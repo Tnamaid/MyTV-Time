@@ -43,6 +43,9 @@ Docker runs the app in a self-contained box, so you don't have to install Node.j
 
 **Linux (Debian/Ubuntu)**
 
+> Setting up a dedicated Debian server from scratch? Follow [SETUP-DEBIAN.md](SETUP-DEBIAN.md)
+> instead: it covers steps 1–6 end to end, then sends you back here for step 7.
+
 Follow <https://docs.docker.com/engine/install/> for your distribution (the "apt repository" method),
 then:
 
