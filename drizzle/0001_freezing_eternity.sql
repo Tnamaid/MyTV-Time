@@ -1,0 +1,1 @@
+ALTER TABLE `import_issue` ADD `meta_json` text;

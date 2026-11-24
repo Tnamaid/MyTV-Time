@@ -87,14 +87,27 @@ async function doImport(db: Db, tmdb: ImportTmdb, bundle: ImportBundle): Promise
 	return report;
 }
 
-function insertIssue(db: Db, kind: 'show' | 'episode' | 'movie', key: string, label: string, candidates?: MovieCandidate[]) {
+/**
+ * Insert an issue once per key. On re-run, an unresolved issue gets its
+ * meta_json refreshed (the bundle is the latest union of both exports);
+ * label/candidates and resolved issues are left alone.
+ */
+function insertIssue(
+	db: Db,
+	kind: 'show' | 'episode' | 'movie',
+	key: string,
+	label: string,
+	meta: Record<string, unknown>,
+	candidates?: MovieCandidate[]
+) {
+	const metaJson = JSON.stringify(meta);
 	db.insert(importIssue)
 		.values({
-			kind, key, label,
+			kind, key, label, metaJson,
 			candidatesJson: candidates ? JSON.stringify(candidates) : null,
 			createdAt: new Date().toISOString()
 		})
-		.onConflictDoNothing({ target: importIssue.key })
+		.onConflictDoUpdate({ target: importIssue.key, set: { metaJson }, setWhere: eq(importIssue.resolved, false) })
 		.run();
 }
 
@@ -124,7 +137,8 @@ async function importShow(db: Db, tmdb: ImportTmdb, s: ImportShow, ws: ImportEpi
 		const label = `${s.name || 'Unknown show'} (tvdb ${s.tvdbId})`;
 		if (titleId === null) {
 			report.showsUnmatched++;
-			insertIssue(db, 'show', `show:${s.tvdbId}`, error ? `${label} — TMDB error: ${error}` : label);
+			const meta = { tvdbId: s.tvdbId, name: s.name, followed: s.followed, archived: s.archived, forLater: s.forLater };
+			insertIssue(db, 'show', `show:${s.tvdbId}`, error ? `${label} — TMDB error: ${error}` : label, meta);
 		} else {
 			if (s.archived) setArchived(db, titleId, true);
 			if (s.forLater) {
@@ -148,13 +162,19 @@ async function importShow(db: Db, tmdb: ImportTmdb, s: ImportShow, ws: ImportEpi
 		}
 		for (const [season, count] of unmatchedBySeason) {
 			const text = `${s.name || `tvdb ${s.tvdbId}`} S${season} — ${count} unmatched episode${count === 1 ? '' : 's'}`;
-			insertIssue(db, 'episode', `episode:${s.tvdbId}:${season}`, resolved.error ? `${text} (TMDB error: ${resolved.error})` : text);
+			insertIssue(db, 'episode', `episode:${s.tvdbId}:${season}`, resolved.error ? `${text} (TMDB error: ${resolved.error})` : text, {
+				tvdbId: s.tvdbId,
+				rawSeason: season
+			});
 		}
 	});
 }
 
 /**
- * Match each watch by (season, episode) among the title's synced episodes.
+ * A synced episode whose persisted tvdb_id equals the raw tvdb episode id
+ * wins (no TMDB call; guards renumbered shows where the raw (season,
+ * episode) points at a different TMDB episode). Otherwise match each watch
+ * by (season, episode) among the title's synced episodes.
  * For any miss, once per title: fetch tvdb ids for synced episodes that lack
  * one (sequentially, persisted for cheap re-runs), then match on the raw tvdb
  * episode id. A failing lookup stops the fallback; the error ends up in the
@@ -169,9 +189,10 @@ async function resolveEpisodes(
 	const out = new Map<ImportEpisodeWatch, number | null>();
 	const eps = db.select().from(episode).where(eq(episode.titleId, titleId)).all();
 	const bySe = new Map(eps.map((e) => [`${e.seasonNumber}:${e.episodeNumber}`, e.id]));
+	const knownTvdb = new Map(eps.filter((e) => e.tvdbId !== null).map((e) => [e.tvdbId!, e.id]));
 	const misses: ImportEpisodeWatch[] = [];
 	for (const w of ws) {
-		const id = bySe.get(`${w.season}:${w.episode}`);
+		const id = knownTvdb.get(w.tvdbEpisodeId) ?? bySe.get(`${w.season}:${w.episode}`);
 		if (id !== undefined) out.set(w, id);
 		else misses.push(w);
 	}
@@ -212,8 +233,9 @@ async function importMovie(db: Db, tmdb: ImportTmdb, m: ImportMovie, report: Imp
 	db.transaction(() => {
 		if (titleId === null) {
 			report.moviesUnmatched++;
+			const meta = { uuid: m.uuid, name: m.name, releaseYear: m.releaseYear, forLater: m.forLater };
 			const label = `${m.name}${m.releaseYear === null ? '' : ` (${m.releaseYear})`}`;
-			insertIssue(db, 'movie', `movie:${m.uuid}`, error ? `${label} — TMDB error: ${error}` : label, candidates);
+			insertIssue(db, 'movie', `movie:${m.uuid}`, error ? `${label} — TMDB error: ${error}` : label, meta, candidates);
 		} else if (m.forLater) {
 			addToWatchlist(db, titleId);
 			report.watchlist++;

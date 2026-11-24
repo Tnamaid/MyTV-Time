@@ -95,6 +95,8 @@ export const importIssue = sqliteTable('import_issue', {
 	key: text('key').notNull().unique(),
 	label: text('label').notNull(),
 	candidatesJson: text('candidates_json'),
+	/** TV Time state of the unmatched item (flags etc.) so a later resolution can apply it. */
+	metaJson: text('meta_json'),
 	resolved: integer('resolved', { mode: 'boolean' }).notNull().default(false),
 	createdAt: text('created_at').notNull()
 });

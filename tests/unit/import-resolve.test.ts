@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { openDb, type Db } from '../../src/lib/server/db/client';
 import { episode, importIssue, title, watch, watchlist } from '../../src/lib/server/db/schema';
 import type { ImportBundle, ImportEpisodeWatch, ImportMovie, ImportShow } from '../../src/lib/server/import/merge';
+import { addSeries } from '../../src/lib/server/titles/service';
 import { normaliseTitle, runImport } from '../../src/lib/server/import/resolve';
 import { TmdbError, type MovieSearchResult } from '../../src/lib/server/tmdb/client';
 import { ep, fakeTmdb, show } from './fakeTmdb';
@@ -363,4 +364,67 @@ test('other TmdbErrors (e.g. 404/500) stay per-title issues', async () => {
 	expect(r.moviesUnmatched).toBe(4);
 	expect(db.select().from(importIssue).where(eq(importIssue.key, 'movie:u-amelie')).get()!.label).toContain('404');
 	expect(db.$client.inTransaction).toBe(false);
+});
+
+test('persisted tvdb_id wins over a colliding (season, episode)', async () => {
+	const db = openDb(':memory:');
+	const t = fakeTmdb({
+		tvdb: { 800: 8 },
+		shows: {
+			8: show({
+				id: 8, name: 'Renum', external_ids: { tvdb_id: 800 },
+				seasons: [
+					{ season_number: 1, name: 'S1', air_date: null },
+					{ season_number: 2, name: 'S2', air_date: null }
+				]
+			})
+		},
+		seasons: { '8:1': { episodes: [ep(1, 1), ep(1, 2), ep(1, 3)] }, '8:2': { episodes: [1, 2, 3, 4, 5].map((i) => ep(2, i)) } }
+	});
+	const titleId = await addSeries(db, t, 8);
+	const s1e3 = db.select().from(episode).all().find((e) => e.seasonNumber === 1 && e.episodeNumber === 3)!;
+	db.update(episode).set({ tvdbId: 9105 }).where(eq(episode.id, s1e3.id)).run();
+	let calls = 0;
+	t.getEpisodeExternalIds = async () => (calls++, { tvdb_id: null });
+	n = 0;
+	const bundle: ImportBundle = {
+		shows: new Map([sh(800, 'Renum')]),
+		episodeWatches: [ew(800, 'Renum', 2, 5, 9105), ew(800, 'Renum', 2, 4, 9104)],
+		movies: new Map()
+	};
+	await runImport(db, t, bundle, { dryRun: false });
+	const w = db.select().from(watch).where(eq(watch.rawTvdbEpisodeId, 9105)).get()!;
+	expect(w.episodeId).toBe(s1e3.id);
+	expect(w.titleId).toBe(titleId);
+	const s2e4 = db.select().from(episode).all().find((e) => e.seasonNumber === 2 && e.episodeNumber === 4)!;
+	expect(db.select().from(watch).where(eq(watch.rawTvdbEpisodeId, 9104)).get()!.episodeId).toBe(s2e4.id);
+	expect(calls).toBe(0);
+});
+
+const meta = (db: Db, key: string) => JSON.parse(db.select().from(importIssue).where(eq(importIssue.key, key)).get()!.metaJson!);
+
+test('issues keep the TV Time state in meta_json', async () => {
+	const db = openDb(':memory:');
+	const bundle = makeBundle();
+	bundle.shows.set(200, { ...bundle.shows.get(200)!, followed: true, archived: true, forLater: true });
+	bundle.movies.get('u-twin')!.forLater = true;
+	await runImport(db, makeTmdb(), bundle, { dryRun: false });
+	expect(meta(db, 'show:200')).toEqual({ tvdbId: 200, name: 'Unknown Show', followed: true, archived: true, forLater: true });
+	expect(meta(db, 'show:500')).toEqual({ tvdbId: 500, name: 'Broken', followed: false, archived: false, forLater: false });
+	expect(meta(db, 'movie:u-twin')).toEqual({ uuid: 'u-twin', name: 'Twin', releaseYear: 2010, forLater: true });
+	expect(meta(db, 'episode:400:2')).toEqual({ tvdbId: 400, rawSeason: 2 });
+});
+
+test('re-run refreshes meta_json of unresolved issues only', async () => {
+	const db = openDb(':memory:');
+	await runImport(db, makeTmdb(), makeBundle(), { dryRun: false });
+	db.update(importIssue).set({ resolved: true }).where(eq(importIssue.key, 'show:500')).run();
+	const bundle = makeBundle();
+	bundle.shows.set(200, { ...bundle.shows.get(200)!, followed: true });
+	bundle.shows.set(500, { ...bundle.shows.get(500)!, followed: true });
+	const before = counts(db);
+	await runImport(db, makeTmdb(), bundle, { dryRun: false });
+	expect(counts(db)).toEqual(before);
+	expect(meta(db, 'show:200').followed).toBe(true);
+	expect(meta(db, 'show:500').followed).toBe(false);
 });
