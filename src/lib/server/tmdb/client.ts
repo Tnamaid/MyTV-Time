@@ -135,3 +135,9 @@ export class TmdbClient {
 		return this.get(`/3/movie/${id}`);
 	}
 }
+
+/** Every TMDB call the app makes; implemented by TmdbClient and the e2e fake. */
+export type TmdbApi = Pick<
+	TmdbClient,
+	'getShow' | 'getSeason' | 'getMovie' | 'searchMovie' | 'searchTv' | 'findByTvdb' | 'getEpisodeExternalIds'
+>;

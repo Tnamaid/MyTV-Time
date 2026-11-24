@@ -1,0 +1,16 @@
+{
+	"id": 1001,
+	"name": "Harbor Lights",
+	"original_name": "Harbor Lights",
+	"first_air_date": "2024-01-08",
+	"poster_path": null,
+	"overview": "A small coastal town, a lighthouse keeper and a mystery that washes ashore.",
+	"status": "Returning Series",
+	"genres": [{ "id": 18, "name": "Drama" }],
+	"origin_country": ["US"],
+	"seasons": [
+		{ "season_number": 0, "name": "Specials", "air_date": "2024-03-01" },
+		{ "season_number": 1, "name": "Season 1", "air_date": "2024-01-08" }
+	],
+	"external_ids": { "tvdb_id": 900001, "imdb_id": null }
+}
