@@ -1,0 +1,4 @@
+ user_id , tv_show_id , tv_show_name , active , archived , created_at 
+ 1 , 78857 , Naruto , 1 , 0 , 2020-03-01 10:00:00 
+ 1 , 81189 , Breaking Bad , 0 , 1 , 2019-11-09 12:00:00 
+ 1 , 334824 , Dark , 0 , 0 , 2020-05-01 08:00:00 
