@@ -1,0 +1,13 @@
+{
+	"id": 1002,
+	"name": "Dune: Sandwalkers",
+	"original_name": "Dune: Sandwalkers",
+	"first_air_date": "2025-03-02",
+	"poster_path": null,
+	"overview": "Invented fixture series: desert scouts on a spice planet.",
+	"status": "Ended",
+	"genres": [{ "id": 10765, "name": "Sci-Fi & Fantasy" }],
+	"origin_country": ["US"],
+	"seasons": [{ "season_number": 1, "name": "Season 1", "air_date": "2025-03-02" }],
+	"external_ids": { "tvdb_id": 900002, "imdb_id": null }
+}

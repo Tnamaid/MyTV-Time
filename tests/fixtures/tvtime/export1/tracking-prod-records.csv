@@ -1,0 +1,7 @@
+ uuid , user_id , type , entity_type , movie_name , release_date , created_at , note 
+ a1b2c3d4-0001 , 1 , watch , movie , Inception , 2010-07-16 00:00:00 , 2021-01-02 20:00:00 , x 
+ a1b2c3d4-0002 , 1 , towatch , movie , Dune , 2021-10-22 00:00:00 , 2021-11-01 10:30:00 , x 
+ a1b2c3d4-0003 , 1 , rewatch , movie , Inception , 2010-07-16 00:00:00 , 2022-05-05 19:00:00 , x 
+ a1b2c3d4-0004 , 1 , watch , movie , Unknown Home Video , 0001-01-01 00:00:00 , 2022-06-06 12:00:00 , x 
+ a1b2c3d4-0005 , 1 , follow , movie , Dune , 2021-10-22 00:00:00 , 2021-10-30 08:00:00 , x 
+ a1b2c3d4-0006 , 1 , watch , series , Naruto , 0001-01-01 00:00:00 , 2020-03-01 20:15:30 , x 

@@ -1,0 +1,8 @@
+{
+	"episodes": [
+		{ "id": 1001001001, "season_number": 1, "episode_number": 1, "name": "Low Tide", "air_date": "2024-01-08", "runtime": 45 },
+		{ "id": 1001001002, "season_number": 1, "episode_number": 2, "name": "The Keeper", "air_date": "2024-01-15", "runtime": 44 },
+		{ "id": 1001001003, "season_number": 1, "episode_number": 3, "name": "Driftwood", "air_date": "2024-01-22", "runtime": 46 },
+		{ "id": 1001001004, "season_number": 1, "episode_number": 4, "name": "Fog Signal", "air_date": "2099-01-05", "runtime": null }
+	]
+}
