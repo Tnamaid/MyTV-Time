@@ -6,6 +6,8 @@
 		name: string | null;
 		airDate: string | null;
 		watchCount: number;
+		/** 'YYYY-MM-DD' of the latest watch when every watch came from TV Time, else null. */
+		importedOnlyOn: string | null;
 	};
 </script>
 
@@ -28,7 +30,13 @@
 	let menu = $state<HTMLDetailsElement>();
 
 	// use:enhance keeps the callback it got at mount, so read `watched` at submit time.
-	const submit = (kind: 'toggle' | 'upTo'): SubmitFunction => () => {
+	const submit = (kind: 'toggle' | 'upTo'): SubmitFunction => ({ cancel }) => {
+		// Unticking an episode watched only in TV Time deletes imported history: ask first.
+		// (Ticking stays one tap; with an app watch present, unticking removes that one silently.)
+		if (kind === 'toggle' && watched && ep.importedOnlyOn) {
+			const when = shortDate(ep.importedOnlyOn, refYear);
+			if (!confirm(`Remove your TV Time watch from ${when}?`)) return cancel();
+		}
 		busy = true;
 		optimistic = kind === 'toggle' ? !watched : null;
 		if (menu) menu.open = false;

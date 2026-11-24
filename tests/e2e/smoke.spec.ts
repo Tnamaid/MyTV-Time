@@ -64,6 +64,55 @@ test('title page: stars, checkboxes, up to here, specials', async ({ page }) => 
 	await expect(page.getByText("You're all caught up")).toBeVisible();
 });
 
+test('title page: unticking a TV Time-only watch asks first; app watches stay one tap', async ({ page }) => {
+	const dialogs: string[] = [];
+	await page.goto('/title/1');
+	const specials = page.locator('details.season').filter({ hasText: 'Specials' });
+	// Specials start closed, and the section closes again after each update (it isn't the open season).
+	// (a CSS locator: role queries skip the rows of a closed section)
+	const box = specials.locator('button[role="checkbox"][aria-label="S00E01 watched"]');
+	const click = async () => {
+		await expect(box).toBeEnabled(); // the previous toggle has finished (and the section re-rendered)
+		if ((await specials.getAttribute('open')) === null) await specials.locator(':scope > summary').click();
+		await box.click();
+	};
+	await expect(box).toBeChecked();
+
+	// Cancel: nothing is posted, the imported watch stays.
+	page.once('dialog', (d) => {
+		dialogs.push(d.message());
+		void d.dismiss();
+	});
+	await click();
+	await expect.poll(() => dialogs).toEqual(['Remove your TV Time watch from Tue 14 Mar 2023?']);
+	await page.reload();
+	await expect(box).toBeChecked();
+
+	// OK: the imported watch is removed.
+	page.once('dialog', (d) => {
+		dialogs.push(d.message());
+		void d.accept();
+	});
+	await click();
+	await expect.poll(() => dialogs.length).toBe(2);
+	await expect(box).not.toBeChecked();
+	await expect(box).toBeEnabled();
+	await page.reload();
+	await expect(box).not.toBeChecked();
+
+	// Ticking is one tap, and unticking an app watch needs no confirmation.
+	page.on('dialog', (d) => {
+		dialogs.push(d.message());
+		void d.dismiss();
+	});
+	await click();
+	await expect(box).toBeChecked();
+	await click();
+	await expect(box).not.toBeChecked();
+	await expect(box).toBeEnabled();
+	expect(dialogs).toHaveLength(2);
+});
+
 test('title page rejects bad form input with 400', async ({ page, baseURL }) => {
 	const res = await page.request.post('/title/1?/markEpisode', {
 		form: { episodeId: 'abc' },

@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { openDb } from '../../src/lib/server/db/client';
 import { episode, title, watch } from '../../src/lib/server/db/schema';
 import {
-	isWatched, markEpisode, markMovie, markSeason, markUpTo, unmarkEpisode, unmarkMovieLatest
+	importedOnlyLatest, isWatched, markEpisode, markMovie, markSeason, markUpTo, unmarkEpisode, unmarkMovieLatest
 } from '../../src/lib/server/watches/service';
 
 const TODAY = '2026-06-01';
@@ -105,4 +105,22 @@ test('movies: markMovie twice adds 2 rows; unmarkMovieLatest removes latest', ()
 	unmarkMovieLatest(db, m.id);
 	unmarkMovieLatest(db, m.id);
 	expect(count(db)).toBe(0);
+});
+
+test('importedOnlyLatest: latest watch of episodes whose watches are all imported', () => {
+	const { db, t, eps } = seed();
+	const add = (key: string, at: string, source: 'app' | 'tvtime1' | 'tvtime2') =>
+		db.insert(watch)
+			.values({ titleId: t.id, episodeId: eps[key].id, watchedAt: at, source, importKey: source === 'app' ? null : `${key}:${at}` })
+			.run();
+	add('1x1', '2023-03-14T21:00:00.000Z', 'tvtime1');
+	add('1x1', '2023-05-02T20:00:00.000Z', 'tvtime2'); // latest of two imported
+	add('1x2', '2023-03-15T21:00:00.000Z', 'tvtime1');
+	add('1x2', '2024-01-01T10:00:00.000Z', 'app'); // an app watch -> no confirm needed
+	add('2x1', '2022-01-01T10:00:00.000Z', 'app');
+	const other = db.insert(title).values({ kind: 'series', tmdbId: 2, name: 'O', addedAt: '2026-01-01T00:00:00.000Z' }).returning().get();
+	const oe = db.insert(episode).values({ titleId: other.id, seasonNumber: 1, episodeNumber: 1 }).returning().get();
+	db.insert(watch).values({ titleId: other.id, episodeId: oe.id, watchedAt: '2020-01-01T00:00:00.000Z', source: 'tvtime1', importKey: 'o' }).run();
+
+	expect(importedOnlyLatest(db, t.id)).toEqual(new Map([[eps['1x1'].id, '2023-05-02T20:00:00.000Z']]));
 });

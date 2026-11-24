@@ -8,6 +8,8 @@
  * a show (TVDB 900002 → fake TMDB 1002 "Dune: Sandwalkers"), a movie ("Dune Part One (2021)",
  * candidate TMDB 438631), an episode issue (Harbor Lights raw S2E5–E6 → S1E1–E2, offset -4)
  * and a movie issue with no candidates ("Lost Reel") to dismiss.
+ * Plus one linked TV Time watch of the special S0E1 (14 Mar 2023, 22:00 Paris), so unticking it
+ * asks for confirmation; Specials stay out of Up next, so the other tests don't see it.
  */
 import { rmSync } from 'node:fs';
 import { and, eq } from 'drizzle-orm';
@@ -30,6 +32,11 @@ db.update(episode)
 	.set({ airDate: inFiveDays.toISOString().slice(0, 10) })
 	.where(and(eq(episode.titleId, titleId), eq(episode.seasonNumber, 1), eq(episode.episodeNumber, 4)))
 	.run();
+const special = db
+	.select({ id: episode.id })
+	.from(episode)
+	.where(and(eq(episode.titleId, titleId), eq(episode.seasonNumber, 0), eq(episode.episodeNumber, 1)))
+	.get()!;
 const at = '2024-02-01T20:00:00.000Z';
 const createdAt = new Date().toISOString();
 db.insert(watch)
@@ -37,7 +44,8 @@ db.insert(watch)
 		{ watchedAt: at, source: 'tvtime1', importKey: 'e2e:show', rawTvdbSeriesId: 900002, rawSeason: 1, rawEpisode: 2, rawSeriesName: 'Dune Sandwalkers' },
 		{ watchedAt: at, source: 'tvtime1', importKey: 'e2e:movie', rawMovieName: 'Dune Part One', rawMovieYear: 2021 },
 		{ titleId, watchedAt: at, source: 'tvtime2', importKey: 'e2e:ep5', rawTvdbSeriesId: 900001, rawSeason: 2, rawEpisode: 5, rawSeriesName: 'Harbor Lights' },
-		{ titleId, watchedAt: at, source: 'tvtime2', importKey: 'e2e:ep6', rawTvdbSeriesId: 900001, rawSeason: 2, rawEpisode: 6, rawSeriesName: 'Harbor Lights' }
+		{ titleId, watchedAt: at, source: 'tvtime2', importKey: 'e2e:ep6', rawTvdbSeriesId: 900001, rawSeason: 2, rawEpisode: 6, rawSeriesName: 'Harbor Lights' },
+		{ titleId, episodeId: special.id, watchedAt: '2023-03-14T21:00:00.000Z', source: 'tvtime1', importKey: 'e2e:special', rawTvdbSeriesId: 900001, rawSeason: 0, rawEpisode: 1, rawSeriesName: 'Harbor Lights' }
 	])
 	.run();
 db.insert(importIssue)

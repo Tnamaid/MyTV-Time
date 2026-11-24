@@ -3,7 +3,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import type { Db } from '#lib/server/db/client.ts';
 import { episode, season, title, watch, watchlist } from '#lib/server/db/schema.ts';
 import { boolField, handleBadInput, intField, optBoolField, starsField } from '#lib/server/forms.ts';
-import { today } from '#lib/server/time.ts';
+import { localDate, today } from '#lib/server/time.ts';
 import { TMDB_IMAGE_BASE } from '#lib/server/tmdb/client.ts';
 import {
 	addToWatchlist,
@@ -15,6 +15,7 @@ import {
 } from '#lib/server/titles/service.ts';
 import { syncSeries } from '#lib/server/titles/sync.ts';
 import {
+	importedOnlyLatest,
 	markEpisode,
 	markMovie,
 	markSeason,
@@ -85,6 +86,7 @@ export const load: PageServerLoad = ({ locals, params }) => {
 	// Raw SQL: drizzle drops table qualifiers in single-table selects, which would make
 	// `episode_id = id` compare against watch.id inside the subquery.
 	const counts = sql<number>`(SELECT COUNT(*) FROM watch w WHERE w.episode_id = episode.id)`;
+	const importedOnly = importedOnlyLatest(db, t.id);
 	const eps = db
 		.select({
 			id: episode.id,
@@ -97,7 +99,12 @@ export const load: PageServerLoad = ({ locals, params }) => {
 		.from(episode)
 		.where(eq(episode.titleId, t.id))
 		.orderBy(asc(episode.seasonNumber), asc(episode.episodeNumber))
-		.all();
+		.all()
+		.map((e) => {
+			// Local date of the TV Time watch that unticking would delete; null if an app watch exists.
+			const last = importedOnly.get(e.id);
+			return { ...e, importedOnlyOn: last ? localDate(last) : null };
+		});
 	const seasonRows = db.select().from(season).where(eq(season.titleId, t.id)).all();
 
 	// Seasons that have episodes or a season row; regular seasons first, Specials (0) last.

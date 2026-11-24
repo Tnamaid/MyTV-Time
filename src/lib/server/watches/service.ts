@@ -45,6 +45,22 @@ export function unmarkEpisode(db: Db, episodeId: number): void {
 	});
 }
 
+/**
+ * For a series: episode id -> watched_at of its latest watch, for the episodes whose
+ * watches ALL came from TV Time. Unticking such an episode deletes imported history
+ * (that latest watch, see unmarkEpisode), so the title page asks for confirmation first.
+ */
+export function importedOnlyLatest(db: Db, titleId: number): Map<number, string> {
+	const rows = db
+		.select({ episodeId: watch.episodeId, last: sql<string>`max(${watch.watchedAt})` })
+		.from(watch)
+		.where(and(eq(watch.titleId, titleId), isNotNull(watch.episodeId)))
+		.groupBy(watch.episodeId)
+		.having(sql`sum(${watch.source} = 'app') = 0`)
+		.all();
+	return new Map(rows.map((r) => [r.episodeId as number, r.last]));
+}
+
 function airedIn(titleId: number, todayStr: string) {
 	return and(eq(episode.titleId, titleId), isNotNull(episode.airDate), lte(episode.airDate, todayStr));
 }

@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { today } from '../../src/lib/server/time';
+import { localDate, today } from '../../src/lib/server/time';
 
 afterEach(() => vi.useRealTimers());
 
@@ -36,4 +36,10 @@ test("today() treats an empty TZ ('') like an unset one: Europe/Paris", () => {
 		if (saved === undefined) delete process.env.TZ;
 		else process.env.TZ = saved;
 	}
+});
+
+test('localDate: an instant as YYYY-MM-DD in the given time zone', () => {
+	expect(localDate('2023-03-14T23:30:00.000Z', 'Europe/Paris')).toBe('2023-03-15');
+	expect(localDate('2023-03-14T23:30:00.000Z', 'UTC')).toBe('2023-03-14');
+	expect(localDate(new Date('2023-07-01T12:00:00Z'), 'Europe/Paris')).toBe('2023-07-01');
 });
