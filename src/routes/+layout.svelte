@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import type { LayoutProps } from './$types';
 
-	let { children }: LayoutProps = $props();
+	let { children, data }: LayoutProps = $props();
 
 	// SVG path data (24×24, stroked) for each tab icon.
 	const tabs = [
@@ -20,11 +20,19 @@
 			icon: 'M4 4h5v16H4zM10.5 4h5v16h-5zM17 5l3.2-.8 3 15.5-3.2.8z'
 		},
 		{ href: '/watchlist', label: 'Watchlist', icon: 'M6 3.5h12v17l-6-4.5-6 4.5z' },
-		{ href: '/search', label: 'Search', icon: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM15.5 15.5 20 20' }
+		{ href: '/search', label: 'Search', icon: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM15.5 15.5 20 20' },
+		{
+			href: '/settings',
+			label: 'Settings',
+			icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.07-.4.1-.8.1-1.2z'
+		}
 	];
 
+	/** Fix imports lives under Settings, so its pages light up that tab too. */
 	const isActive = (href: string) =>
-		href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
+		href === '/'
+			? page.url.pathname === '/'
+			: page.url.pathname.startsWith(href) || (href === '/settings' && page.url.pathname.startsWith('/fix-imports'));
 </script>
 
 <svelte:head>
@@ -38,8 +46,16 @@
 			{#each tabs as tab (tab.href)}
 				<li>
 					<a href={tab.href} aria-current={isActive(tab.href) ? 'page' : undefined}>
-						<svg viewBox="0 0 24 24" aria-hidden="true"><path d={tab.icon} /></svg>
+						<span class="icon">
+							<svg viewBox="0 0 24 24" aria-hidden="true"><path d={tab.icon} /></svg>
+							{#if tab.href === '/settings' && data.openIssues > 0}
+								<span class="badge" aria-hidden="true"></span>
+							{/if}
+						</span>
 						<span>{tab.label}</span>
+						{#if tab.href === '/settings' && data.openIssues > 0}
+							<span class="visually-hidden">({data.openIssues} open import issue{data.openIssues === 1 ? '' : 's'})</span>
+						{/if}
 					</a>
 				</li>
 			{/each}
@@ -74,7 +90,7 @@
 
 	ul {
 		display: grid;
-		grid-template-columns: repeat(5, 1fr);
+		grid-template-columns: repeat(6, 1fr);
 		margin: 0;
 		padding: 0;
 		list-style: none;
@@ -89,12 +105,29 @@
 		height: var(--nav-h);
 		color: var(--muted);
 		text-decoration: none;
-		font-size: 0.72rem;
+		font-size: 0.7rem;
 		font-weight: 600;
+		white-space: nowrap;
 	}
 
 	ul a[aria-current='page'] {
 		color: var(--accent);
+	}
+
+	.icon {
+		position: relative;
+		display: grid;
+	}
+
+	.badge {
+		position: absolute;
+		top: -2px;
+		right: -4px;
+		width: 9px;
+		height: 9px;
+		border-radius: 50%;
+		background: var(--danger);
+		box-shadow: 0 0 0 2px var(--surface);
 	}
 
 	svg {

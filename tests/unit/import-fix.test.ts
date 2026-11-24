@@ -5,7 +5,7 @@ import { episode, importIssue, title, watch, watchlist } from '../../src/lib/ser
 import type { ImportBundle, ImportEpisodeWatch, ImportMovie, ImportShow } from '../../src/lib/server/import/merge';
 import { runImport } from '../../src/lib/server/import/resolve';
 import {
-	dismissIssue, fixEpisodes, fixMovie, fixShow, listOpenIssues, previewEpisodeMapping
+	dismissIssue, episodeIssueTarget, fixEpisodes, fixMovie, fixShow, listOpenIssues, previewEpisodeMapping
 } from '../../src/lib/server/import/fix';
 import { addSeries } from '../../src/lib/server/titles/service';
 import { ep, fakeTmdb, show } from './fakeTmdb';
@@ -170,4 +170,26 @@ test('fixEpisodes resolves the issue by the raw tvdb id even when the title carr
 	expect(issue(db, 'episode:200:3').resolved).toBe(false);
 	expect(fixEpisodes(db, titleId, 3, { targetSeason: 1, offset: 0 })).toEqual({ linked: 1, unlinked: 0 });
 	expect(issue(db, 'episode:200:3').resolved).toBe(true);
+});
+
+test('episodeIssueTarget finds the title of an open episode issue (via its watches, else title.tvdb_id)', async () => {
+	const db = await seed();
+	expect(episodeIssueTarget(db, 'show:200')).toBeNull(); // not an episode issue
+	expect(episodeIssueTarget(db, 'episode:nope')).toBeNull();
+	await fixShow(db, fixTmdb(), 'show:300', 30);
+	const t = db.select().from(title).where(eq(title.tmdbId, 30)).get()!;
+	expect(episodeIssueTarget(db, 'episode:300:1')).toEqual({ titleId: t.id, rawSeason: 1, tvdbId: 300 });
+
+	// Title carries a different tvdb id: the raw watches still point at it.
+	db.update(title).set({ tvdbId: 999 }).where(eq(title.id, t.id)).run();
+	expect(episodeIssueTarget(db, 'episode:300:1')?.titleId).toBe(t.id);
+
+	// No linked watch (all fixed or none imported): fall back to title.tvdb_id.
+	db.update(title).set({ tvdbId: 300 }).where(eq(title.id, t.id)).run();
+	db.update(watch).set({ titleId: null }).where(eq(watch.rawTvdbSeriesId, 300)).run();
+	expect(episodeIssueTarget(db, 'episode:300:1')?.titleId).toBe(t.id);
+
+	// Resolved issues are not targets any more.
+	dismissIssue(db, 'episode:300:1');
+	expect(episodeIssueTarget(db, 'episode:300:1')).toBeNull();
 });

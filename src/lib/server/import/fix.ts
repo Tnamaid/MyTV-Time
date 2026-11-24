@@ -204,6 +204,44 @@ export async function fixMovie(db: Db, tmdb: ImportTmdb, issueKey: string, tmdbI
 	});
 }
 
+type EpisodeMeta = { tvdbId: number; rawSeason: number };
+
+/**
+ * The library title an open episode issue belongs to, for fixEpisodes/previewEpisodeMapping.
+ * Prefers the title its unlinked raw watches already point at (the importer's tvdb id may
+ * differ from title.tvdb_id), else the series whose tvdb_id matches. Null if the issue is not
+ * an open episode issue or no such title exists yet (fix the show first).
+ */
+export function episodeIssueTarget(
+	db: Db,
+	issueKey: string
+): { titleId: number; rawSeason: number; tvdbId: number } | null {
+	const row = db.select().from(importIssue).where(eq(importIssue.key, issueKey)).get();
+	if (!row || row.kind !== 'episode' || row.resolved) return null;
+	const meta = parse<EpisodeMeta>(row.metaJson);
+	if (!meta) return null;
+	const viaWatch = db
+		.select({ titleId: watch.titleId })
+		.from(watch)
+		.where(
+			and(
+				eq(watch.rawTvdbSeriesId, meta.tvdbId),
+				eq(watch.rawSeason, meta.rawSeason),
+				isNotNull(watch.titleId),
+				isNull(watch.episodeId)
+			)
+		)
+		.get();
+	const titleId =
+		viaWatch?.titleId ??
+		db
+			.select({ id: title.id })
+			.from(title)
+			.where(and(eq(title.kind, 'series'), eq(title.tvdbId, meta.tvdbId)))
+			.get()?.id;
+	return titleId == null ? null : { titleId, rawSeason: meta.rawSeason, tvdbId: meta.tvdbId };
+}
+
 export function dismissIssue(db: Db, issueKey: string): void {
 	getIssue(db, issueKey);
 	resolveIssue(db, issueKey);

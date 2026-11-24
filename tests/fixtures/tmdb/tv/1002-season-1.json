@@ -1,0 +1,6 @@
+{
+	"episodes": [
+		{ "id": 1002001001, "season_number": 1, "episode_number": 1, "name": "First Step", "air_date": "2025-03-02", "runtime": 50 },
+		{ "id": 1002001002, "season_number": 1, "episode_number": 2, "name": "Thumper", "air_date": "2025-03-09", "runtime": 50 }
+	]
+}

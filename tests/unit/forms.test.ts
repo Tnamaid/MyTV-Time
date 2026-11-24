@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { BadInput, boolField, handleBadInput, intField, optBoolField, starsField } from '../../src/lib/server/forms';
+import {
+	BadInput,
+	boolField,
+	enumField,
+	handleBadInput,
+	intField,
+	optBoolField,
+	signedIntField,
+	starsField,
+	textField
+} from '../../src/lib/server/forms';
 import { epCode, shortDate } from '../../src/lib/format';
 
 const fd = (o: Record<string, string>) => {
@@ -15,6 +25,22 @@ describe('form field parsers', () => {
 		for (const bad of ['', '-1', '1.5', '1e3', 'abc', '0x10', '9999999999'])
 			expect(() => intField(fd({ id: bad }), 'id')).toThrow(BadInput);
 		expect(() => intField(fd({}), 'id')).toThrow(BadInput);
+	});
+
+	it('signedIntField accepts negative integers', () => {
+		expect(signedIntField(fd({ o: '-4' }), 'o')).toBe(-4);
+		expect(signedIntField(fd({ o: '12' }), 'o')).toBe(12);
+		for (const bad of ['', '-', '1.5', '+3', 'x', '--1', '1234567'])
+			expect(() => signedIntField(fd({ o: bad }), 'o')).toThrow(BadInput);
+	});
+
+	it('textField / enumField', () => {
+		expect(textField(fd({ k: ' show:1 ' }), 'k')).toBe('show:1');
+		expect(() => textField(fd({ k: '  ' }), 'k')).toThrow(BadInput);
+		expect(() => textField(fd({ k: 'x'.repeat(11) }), 'k', 10)).toThrow(BadInput);
+		expect(enumField(fd({ kind: 'movie' }), 'kind', ['movie', 'series'] as const)).toBe('movie');
+		expect(() => enumField(fd({ kind: 'Movie' }), 'kind', ['movie', 'series'] as const)).toThrow(BadInput);
+		expect(() => enumField(fd({}), 'kind', ['movie'] as const)).toThrow(BadInput);
 	});
 
 	it('starsField: empty clears, 1..5 accepted, anything else rejected', () => {

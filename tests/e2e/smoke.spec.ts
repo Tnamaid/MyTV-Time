@@ -87,6 +87,119 @@ test('refresh re-syncs from TMDB', async ({ page }) => {
 	await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
+test('search "Dune" → Watchlist → appears on /watchlist', async ({ page }) => {
+	await page.goto('/');
+	await page.getByRole('navigation').getByRole('link', { name: 'Search' }).click();
+	await page.getByRole('searchbox', { name: 'Search TMDB' }).fill('Dune');
+	await page.getByRole('button', { name: 'Search', exact: true }).click();
+	await expect(page).toHaveURL(/\/search\?q=Dune/);
+
+	const movie = page.getByRole('article').filter({ hasText: 'Movie · 2021' });
+	await expect(movie.getByRole('heading', { name: 'Dune' })).toBeVisible();
+	// Series results get a Follow button; movies don't.
+	const series = page.getByRole('article').filter({ hasText: 'Dune: Sandwalkers' });
+	await expect(series.getByRole('button', { name: 'Follow' })).toBeVisible();
+	await expect(movie.getByRole('button', { name: 'Follow' })).toHaveCount(0);
+
+	await movie.getByRole('button', { name: 'Watchlist' }).click();
+	await expect(movie.getByRole('link', { name: /In library/ })).toBeVisible();
+	await expect(movie).toContainText('On watchlist');
+
+	await page.getByRole('navigation').getByRole('link', { name: 'Watchlist' }).click();
+	await expect(page.getByRole('heading', { name: 'Watchlist', level: 1 })).toBeVisible();
+	await expect(page.getByRole('article').filter({ hasText: 'Dune' })).toBeVisible();
+});
+
+test('library filters live in the URL; bad values are ignored', async ({ page }) => {
+	await page.goto('/library');
+	await expect(page.getByRole('heading', { name: 'Harbor Lights' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Dune' })).toBeVisible();
+
+	await page.getByLabel('Kind').selectOption('movie');
+	await expect(page).toHaveURL(/kind=movie/);
+	await expect(page.getByRole('heading', { name: 'Dune' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Harbor Lights' })).toHaveCount(0);
+
+	const res = await page.goto('/library?kind=bogus&stars=9&sort=nope&followed=maybe');
+	expect(res!.status()).toBe(200);
+	await expect(page.getByRole('heading', { name: 'Harbor Lights' })).toBeVisible();
+	await expect(page.getByRole('heading', { name: 'Dune' })).toBeVisible();
+});
+
+test('fix imports: dismiss, episode offset with preview, movie candidate, show search', async ({ page }) => {
+	await page.goto('/settings');
+	// The Settings tab carries a badge while issues are open.
+	await expect(page.getByRole('navigation').getByRole('link', { name: 'Settings (4 open import issues)' })).toBeVisible();
+	await page.getByRole('link', { name: /Fix imports.*4 open/ }).click();
+	await expect(page.getByRole('heading', { name: 'Fix imports', level: 1 })).toBeVisible();
+
+	// Dismiss: the issue goes away (its watch rows stay).
+	const lost = page.getByRole('article').filter({ hasText: 'Lost Reel (1999)' });
+	await lost.getByRole('button', { name: 'Dismiss' }).click();
+	await expect(page.getByRole('article').filter({ hasText: 'Lost Reel (1999)' })).toHaveCount(0);
+
+	// Episode issue: Harbor Lights raw S2E5–E6 are really S1E1–E2.
+	const ep = page.getByRole('article').filter({ hasText: 'Harbor Lights S2' });
+	await ep.getByLabel('Target season', { exact: true }).fill('1');
+	await ep.getByLabel('Offset', { exact: true }).fill('-4');
+	await expect(ep.getByRole('list', { name: 'Preview' })).toContainText('S02E05 → S01E01 · Low Tide');
+	await expect(ep.getByRole('list', { name: 'Preview' })).toContainText('S02E06 → S01E02 · The Keeper');
+	await ep.getByRole('button', { name: 'Apply' }).click();
+	await expect(page.getByRole('status')).toContainText('Linked 2');
+	await expect(page.getByRole('article').filter({ hasText: 'Harbor Lights S2' })).toHaveCount(0);
+
+	// Movie issue: pick the stored candidate.
+	const movie = page.getByRole('article').filter({ hasText: 'Dune Part One (2021)' });
+	await movie.getByRole('button', { name: 'Pick Dune (2021)' }).click();
+	await expect(page.getByRole('article').filter({ hasText: 'Dune Part One (2021)' })).toHaveCount(0);
+
+	// Show issue: free TMDB search, then pick.
+	const show = page.getByRole('article').filter({ hasText: 'Dune Sandwalkers (tvdb 900002)' });
+	await show.getByRole('searchbox').fill('Dune');
+	await show.getByRole('button', { name: 'Search TMDB' }).click();
+	await page
+		.getByRole('article')
+		.filter({ hasText: 'Dune Sandwalkers (tvdb 900002)' })
+		.getByRole('button', { name: 'Pick Dune: Sandwalkers (2025)' })
+		.click();
+	await expect(page.getByText('No open import issues')).toBeVisible();
+	await expect(page.getByRole('navigation').getByRole('link', { name: 'Settings', exact: true })).toBeVisible();
+
+	// The fixed show is now in the library with its imported watch linked.
+	await page.goto('/library?q=Sandwalkers');
+	await expect(page.getByRole('heading', { name: 'Dune: Sandwalkers' })).toBeVisible();
+	await expect(page.getByRole('article').filter({ hasText: 'Dune: Sandwalkers' })).toContainText('1 watch');
+});
+
+test('fix imports, search and preview reject bad input with 400', async ({ page, baseURL }) => {
+	const bad = await page.request.post('/fix-imports?/fixEpisodes', {
+		form: { key: 'episode:900001:2', season: '1', offset: 'x' },
+		headers: { origin: baseURL! }
+	});
+	expect(bad.status()).toBe(400);
+	const search = await page.request.post('/search?/watchlist', {
+		form: { tmdbId: 'abc', kind: 'movie' },
+		headers: { origin: baseURL! }
+	});
+	expect(search.status()).toBe(400);
+	const preview = await page.request.get('/fix-imports/preview?key=episode%3A900001%3A2&season=1&offset=oops');
+	expect(preview.status()).toBe(400);
+});
+
+test('settings: JSON export downloads every table', async ({ page }) => {
+	await page.goto('/settings');
+	await expect(page.getByText(/tracker\.db/)).toBeVisible();
+	const res = await page.request.get('/settings/export');
+	expect(res.status()).toBe(200);
+	expect(res.headers()['content-disposition']).toMatch(/^attachment; filename="watch-tracker-export-\d{4}-\d{2}-\d{2}\.json"$/);
+	const body = await res.json();
+	expect(body.titles.map((t: { name: string }) => t.name).sort()).toEqual(['Dune', 'Dune: Sandwalkers', 'Harbor Lights']);
+	expect(body.watchlist).toHaveLength(1);
+	expect(body.importIssues).toHaveLength(4);
+	expect(body.importIssues.every((i: { resolved: boolean }) => i.resolved)).toBe(true);
+	expect(body.watches.length).toBeGreaterThanOrEqual(4);
+});
+
 test('desktop: side navigation instead of the tab bar', async ({ page }) => {
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await page.goto('/');

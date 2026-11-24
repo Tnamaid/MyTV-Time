@@ -47,3 +47,24 @@ export async function handleBadInput<T>(fn: () => T | Promise<T>) {
 		throw e;
 	}
 }
+
+/** An integer that may be negative (episode offsets). */
+export function signedIntField(form: FormData, name: string): number {
+	const v = raw(form, name);
+	if (!/^-?\d{1,6}$/.test(v)) throw new BadInput(`invalid ${name}`);
+	return Number(v);
+}
+
+/** A non-empty string of at most `max` characters (issue keys, queries). */
+export function textField(form: FormData, name: string, max = 200): string {
+	const v = raw(form, name);
+	if (v === '' || v.length > max) throw new BadInput(`invalid ${name}`);
+	return v;
+}
+
+/** One of `values`, exactly. */
+export function enumField<T extends string>(form: FormData, name: string, values: readonly T[]): T {
+	const v = raw(form, name);
+	if (!(values as readonly string[]).includes(v)) throw new BadInput(`invalid ${name}`);
+	return v as T;
+}
