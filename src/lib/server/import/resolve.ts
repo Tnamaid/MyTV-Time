@@ -27,8 +27,9 @@ export type ImportReport = {
 
 /**
  * Write a merged TV Time bundle into the db. TMDB failures for one show/movie
- * (any TmdbError except 401/403) are recorded as import issues and the run
- * continues; 401/403 and non-TmdbErrors abort and roll back. Every watch is
+ * (any TmdbError except 401/403 and network status 0) are recorded as import
+ * issues and the run continues; 401/403, status 0 (network down after the
+ * client's retries) and non-TmdbErrors abort and roll back. Every watch is
  * stored (with its raw TV Time fields) whether or not it could be linked.
  * Re-runnable: watches dedupe on import_key, issues on key.
  *

@@ -354,6 +354,22 @@ test('non-TmdbError (programming/network error) aborts instead of becoming an is
 	expect(counts(db)).toEqual(empty);
 });
 
+test('network failure after the client gave up (TmdbError status 0) aborts and rolls back', async () => {
+	const db = openDb(':memory:');
+	await runImport(db, makeTmdb(), makeBundle(), { dryRun: false });
+	const before = counts(db);
+	const t = makeTmdb();
+	t.searchMovie = async () => {
+		throw new TmdbError(0, 'network error: TypeError: fetch failed');
+	};
+	const bundle = makeBundle();
+	bundle.shows.set(999, { tvdbId: 999, name: 'New', followed: false, archived: false, forLater: false });
+	await expect(runImport(db, t, bundle, { dryRun: false })).rejects.toMatchObject({ status: 0 });
+	expect(db.$client.inTransaction).toBe(false);
+	expect(counts(db)).toEqual(before);
+	expect(db.select().from(importIssue).where(eq(importIssue.key, 'show:999')).get()).toBeUndefined();
+});
+
 test('other TmdbErrors (e.g. 404/500) stay per-title issues', async () => {
 	const db = openDb(':memory:');
 	const t = makeTmdb();

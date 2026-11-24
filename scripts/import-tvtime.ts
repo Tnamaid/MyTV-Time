@@ -44,6 +44,8 @@ try {
 	db.$client.close();
 	if (e instanceof TmdbError && (e.status === 401 || e.status === 403))
 		fail(`TMDB rejected the API key (${e.status}) — check TMDB_API_KEY. Nothing was written.`);
+	if (e instanceof TmdbError && e.status === 0)
+		fail(`Could not reach TMDB, even after retries (${e.message}). Check the internet connection and re-run. Nothing was written.`);
 	console.error('Import aborted, nothing was written:', e);
 	process.exit(1);
 }

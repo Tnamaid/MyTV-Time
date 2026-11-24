@@ -8,12 +8,20 @@ export type LinkTmdb = Pick<TmdbClient, 'getEpisodeExternalIds'>;
 /** The raw TV Time identity of an episode watch, all that linking needs. */
 export type RawEpisode = { tvdbEpisodeId: number; season: number; episode: number };
 
+/** TmdbError statuses that abort an import run instead of becoming an issue. */
+const FATAL_STATUSES = new Set([
+	0, // network unreachable / timeouts, after the client's own retries
+	401, // bad API key
+	403
+]);
+
 /**
- * Per-title errors become import issues; anything else aborts the run:
- * TMDB 401/403 (bad key/config) and non-TmdbErrors (bugs, network down).
+ * Per-title errors (TMDB 404, 5xx/429 after retries, ...) become import issues;
+ * anything else aborts the run: TMDB 401/403 (bad key/config), status 0
+ * (network down even after retries) and non-TmdbErrors (bugs).
  */
 export function recoverable(e: unknown): string {
-	if (e instanceof TmdbError && e.status !== 401 && e.status !== 403) return e.message;
+	if (e instanceof TmdbError && !FATAL_STATUSES.has(e.status)) return e.message;
 	throw e;
 }
 
