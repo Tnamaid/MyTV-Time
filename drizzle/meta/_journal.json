@@ -15,6 +15,13 @@
       "when": 1795523539788,
       "tag": "0001_freezing_eternity",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795526638581,
+      "tag": "0002_watch_indexes",
+      "breakpoints": true
     }
   ]
 }

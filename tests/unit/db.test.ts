@@ -67,3 +67,18 @@ test('openDb creates missing parent directory for file paths', () => {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test('watch.title_id and watch.episode_id are indexed (Up next / Library scans)', () => {
+	const db = openDb(':memory:');
+	const idx = db
+		.all<{ name: string; tbl_name: string }>(sql`select name, tbl_name from sqlite_master where type='index'`)
+		.filter((r) => r.tbl_name === 'watch')
+		.map((r) => r.name);
+	expect(idx).toContain('watch_title_id_idx');
+	expect(idx).toContain('watch_episode_id_idx');
+	const plan = db
+		.all<{ detail: string }>(sql`explain query plan select id from watch where episode_id = 1`)
+		.map((r) => r.detail)
+		.join(' ');
+	expect(plan).toContain('watch_episode_id_idx');
+});

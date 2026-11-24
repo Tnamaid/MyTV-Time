@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
+import { check, index, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
 
 const id = () => integer('id').primaryKey({ autoIncrement: true });
 
@@ -78,7 +78,10 @@ export const watch = sqliteTable('watch', {
 	rawSeriesName: text('raw_series_name'),
 	rawMovieName: text('raw_movie_name'),
 	rawMovieYear: integer('raw_movie_year')
-});
+}, (t) => [
+	index('watch_title_id_idx').on(t.titleId),
+	index('watch_episode_id_idx').on(t.episodeId)
+]);
 
 export const watchlist = sqliteTable('watchlist', {
 	id: id(),
