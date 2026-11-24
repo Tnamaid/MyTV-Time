@@ -10,7 +10,7 @@ almost nothing to maintain. Security updates install themselves.
 
 You need:
 - a USB stick (1 GB or more; **it gets erased**)
-- a network cable for the PC (simplest; Wi-Fi works but is fiddlier without a desktop)
+- your Wi-Fi network name and password (the PC connects over Wi-Fi; no cable needed)
 - about 1 hour
 
 > **Installing Debian erases the whole disk of the old PC**, Fedora included. Copy off anything you
@@ -28,10 +28,18 @@ You need:
 
 ## 2. Install Debian on the old PC
 
-1. Plug in the USB stick and the network cable, then start the PC and open its boot menu. The key is
-   usually **F12**, **F11**, **F8** or **Esc**, and it's shown briefly at power-on. Pick the USB stick.
+1. Plug in the USB stick, then start the PC and open its boot menu. The key is usually **F12**,
+   **F11**, **F8** or **Esc**, and it's shown briefly at power-on. Pick the USB stick.
 2. Choose **Graphical install**. Then:
    - **Language / location / keyboard**: whatever suits you (French keyboard = "French").
+   - **Network (Wi-Fi)**: the installer needs internet to download packages.
+     - If it asks for the **primary network interface**, pick the wireless one. Its name usually
+       starts with `wl`, e.g. `wlp2s0`.
+     - Choose your **Wi-Fi network** in the list (or type its name), pick **WPA/WPA2 PSK**, and enter
+       the Wi-Fi password.
+     - If it says it can't find a network card or is missing firmware, see
+       [Wi-Fi problems](#wi-fi-problems) below.
+     - The installer saves this Wi-Fi setup, so the PC reconnects by itself after every reboot.
    - **Hostname**: a plain name such as `homeserver`. This becomes the machine's name on your
      tailnet and in the app's address (`https://homeserver.<tailnet>.ts.net`). It also appears in
      public certificate logs, so don't put anything personal in it.
@@ -55,9 +63,13 @@ You need:
 Log in at the PC's screen with your username and password, then:
 
 ```bash
-# find the PC's local IP address (the "inet" on the line for your network card, e.g. 192.168.1.42)
+# find the PC's local IP address: the line starting with "wl…" (your Wi-Fi card) shows
+# "UP" and an address like 192.168.1.42/24 — the IP is the part before the "/"
 ip -br a
 ```
+
+If the `wl…` line says `DOWN` or has no address, the Wi-Fi didn't come up after the reboot. See
+[Wi-Fi problems](#wi-fi-problems).
 
 From now on you can work from your main computer instead. Open a terminal there (PowerShell on
 Windows) and run:
@@ -77,12 +89,38 @@ sudo apt install -y curl git ca-certificates unattended-upgrades
 sudo dpkg-reconfigure -plow unattended-upgrades      # answer "Yes"
 ```
 
+**Stop the Wi-Fi from dozing off.** Many Wi-Fi cards save power by going half-asleep, which makes a
+server slow to answer or drop off now and then. Turn that off permanently:
+
+```bash
+sudo apt install -y iw
+IFACE=$(ls /sys/class/net | grep '^wl' | head -n1); echo "Wi-Fi card: $IFACE"
+sudo tee /etc/systemd/system/wifi-powersave-off.service <<EOF
+[Unit]
+Description=Disable Wi-Fi power saving
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/iw dev $IFACE set power_save off
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl enable --now wifi-powersave-off.service
+iw dev $IFACE get power_save          # should print "Power save: off"
+```
+
 **If it's a laptop**, stop it from sleeping when the lid is closed:
 
 ```bash
 sudo sed -i 's/^#\?HandleLidSwitch=.*/HandleLidSwitch=ignore/' /etc/systemd/logind.conf
 sudo systemctl restart systemd-logind
 ```
+
+Place the PC where the Wi-Fi signal is decent. A weak signal is the most common reason a Wi-Fi server
+feels slow or unreachable.
 
 **Recommended:** in the PC's BIOS/UEFI setup (usually **F2** or **Del** at power-on), look for a
 setting like *"Restore on AC power loss"* / *"After power failure"* and set it to **Power On**.
@@ -229,6 +267,53 @@ You should see **Up next**. 🎉
   scp -r "C:\path\to\gdpr-data\gdpr-data 1" "C:\path\to\gdpr-data\gdpr-data 2" tnamaid@homeserver:~/mytv-time/gdpr-data/
   ```
 - [9. Backups](INSTALL.md#9-backups)
+
+## Wi-Fi problems
+
+**During the install: "no network interfaces detected" or "missing firmware"**
+
+Debian's install images already include most Wi-Fi firmware, but some cards aren't covered.
+Pick the easiest way round:
+
+- **Phone USB tethering (easiest):** plug your phone into the PC with a USB cable and turn on
+  *USB tethering* (Android: Settings → Network → Hotspot & tethering; iPhone: Personal Hotspot,
+  with the cable). Go back to the network step: the installer sees it as a wired connection and
+  finishes the install. After the first boot, set up the Wi-Fi as described below, then unplug the phone.
+- Or write down the message (especially any firmware file name like `iwlwifi-….ucode` and the card
+  model) and ask for help.
+
+**After the install: the `wl…` interface is DOWN or has no address**
+
+The installer stores the Wi-Fi settings in `/etc/network/interfaces`. Check them:
+
+```bash
+cat /etc/network/interfaces
+```
+
+You should see a block like this (with your card's name, network name and password):
+
+```
+allow-hotplug wlp2s0
+iface wlp2s0 inet dhcp
+	wpa-ssid MyWifiName
+	wpa-psk  MyWifiPassword
+```
+
+If it's missing or wrong, fix it with `sudo nano /etc/network/interfaces` (the indented lines start
+with a Tab), then bring the Wi-Fi up:
+
+```bash
+sudo apt install -y wpasupplicant      # only needed if you installed over phone tethering
+sudo ifdown wlp2s0; sudo ifup wlp2s0  # use your card's name from `ip -br a`
+ip -br a                               # the wl… line should now show UP and an address
+```
+
+The Wi-Fi password is stored in plain text in that file. Restrict it to admin users:
+`sudo chmod 600 /etc/network/interfaces`.
+
+**Changed your Wi-Fi password or box?** Edit the same two `wpa-` lines, then run the
+`ifdown`/`ifup` command again. Do this at the PC's own screen and keyboard, since SSH won't
+reach it until the Wi-Fi works again.
 
 ## Everyday commands (cheat sheet)
 
