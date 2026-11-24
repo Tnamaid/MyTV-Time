@@ -5,7 +5,7 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import * as schema from './schema';
 
-export type Db = BetterSQLite3Database<typeof schema>;
+export type Db = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
 
 /** Open (and migrate) a SQLite database. Use ':memory:' for tests. Run from repo root. */
 export function openDb(path: string): Db {

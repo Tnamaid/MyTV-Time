@@ -1,6 +1,11 @@
-import type { TmdbClient, ShowDetails, SeasonDetails, MovieDetails } from '../../src/lib/server/tmdb/client';
+import type {
+	TmdbClient, ShowDetails, SeasonDetails, MovieDetails, MovieSearchResult
+} from '../../src/lib/server/tmdb/client';
 
-export type FakeTmdb = Pick<TmdbClient, 'getShow' | 'getSeason' | 'getMovie'>;
+export type FakeTmdb = Pick<
+	TmdbClient,
+	'getShow' | 'getSeason' | 'getMovie' | 'findByTvdb' | 'searchMovie' | 'getEpisodeExternalIds'
+>;
 
 export function ep(season: number, n: number, over: Record<string, unknown> = {}) {
 	return {
@@ -35,6 +40,12 @@ export function fakeTmdb(opts: {
 	shows?: Record<number, ShowDetails>;
 	seasons?: Record<string, SeasonDetails | Error>;
 	movies?: Record<number, MovieDetails>;
+	/** tvdb series id -> tmdb id (or Error to throw). Missing -> null. */
+	tvdb?: Record<number, number | Error>;
+	/** search query -> results (or Error). Missing -> []. Year filter applied on release_date. */
+	movieSearch?: Record<string, MovieSearchResult[] | Error>;
+	/** `${showId}:${s}:${e}` -> tvdb episode id. Missing -> null. */
+	episodeTvdb?: Record<string, number>;
 }): FakeTmdb {
 	return {
 		getShow: async (id) => {
@@ -52,6 +63,19 @@ export function fakeTmdb(opts: {
 			const m = opts.movies?.[id];
 			if (!m) throw new Error('no movie ' + id);
 			return m;
-		}
+		},
+		findByTvdb: async (tvdbId) => {
+			const r = opts.tvdb?.[tvdbId];
+			if (r instanceof Error) throw r;
+			return r ?? null;
+		},
+		searchMovie: async (query, year) => {
+			const r = opts.movieSearch?.[query] ?? [];
+			if (r instanceof Error) throw r;
+			return year === undefined ? r : r.filter((m) => m.release_date.startsWith(String(year)));
+		},
+		getEpisodeExternalIds: async (showId, s, e) => ({
+			tvdb_id: opts.episodeTvdb?.[`${showId}:${s}:${e}`] ?? null
+		})
 	};
 }
