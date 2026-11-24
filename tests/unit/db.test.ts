@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { openDb } from '../../src/lib/server/db/client';
@@ -53,4 +56,14 @@ test('foreign keys enforced', () => {
 			.values({ titleId: 999, watchedAt: '2026-11-24T00:00:00Z', source: 'app' })
 			.run()
 	).toThrow();
+});
+
+test('openDb creates missing parent directory for file paths', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'mytv-'));
+	try {
+		const db = openDb(join(dir, 'nested', 'tracker.db'));
+		expect(db.select().from(title).all()).toEqual([]);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
