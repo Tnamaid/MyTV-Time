@@ -196,27 +196,61 @@ It can take several minutes (hundreds of TMDB lookups).
 docker compose exec app npm run import -- --dir1 "/gdpr-data/gdpr-data 1" --dir2 "/gdpr-data/gdpr-data 2" --dry-run
 ```
 
-It ends with `DRY RUN — nothing was written.` and a table:
+It ends with `DRY RUN — nothing was written.`, a table of counts and a sanity check. The counts
+are **totals: matched + unmatched**; the `…Unmatched` line next to each says how many of them still
+need a hand in Fix imports.
 
-| Line                      | Meaning                                                                    |
-| ------------------------- | -------------------------------------------------------------------------- |
-| `shows`                   | Shows found and matched to TMDB                                            |
-| `showsUnmatched`          | Shows that could not be matched automatically (you fix them afterwards)    |
-| `episodeWatches`          | Episode "watched" records linked to a TMDB episode                         |
-| `episodeWatchesUnmatched` | Episode watches kept, but not yet linked to an episode                     |
-| `movies`                  | Movies matched to TMDB                                                     |
-| `moviesUnmatched`         | Movies that could not be matched automatically                             |
-| `watchlist`               | "For later" items added to your watchlist                                  |
-| `skippedExisting`         | Watches already imported by a previous run (0 the first time)              |
+| Line                      | Meaning                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------- |
+| `shows`                   | Shows found in the exports (matched + unmatched)                                |
+| `showsUnmatched`          | Of those, shows not matched to TMDB automatically (you fix them afterwards)     |
+| `episodeWatches`          | Episode "watched" records found (linked + not yet linked)                       |
+| `episodeWatchesUnmatched` | Of those, watches kept but not yet linked to a TMDB episode                     |
+| `movies`                  | Movies found (matched + unmatched)                                              |
+| `moviesUnmatched`         | Of those, movies not matched to TMDB automatically                              |
+| `watchlist`               | "For later" items added to your watchlist                                       |
+| `skippedExisting`         | Watches already imported by a previous run (0 the first time)                   |
 
-What to expect from your exports: roughly **237 shows**, **9,000 episode watches** and **340 movies**
-(matched + unmatched together). A handful of unmatched entries is normal. If the totals are far off,
-stop here and report it rather than importing.
+What to expect from your exports: roughly **237 shows**, **9,000 episode watches** and **340 movies**.
+A handful of unmatched entries is normal. If the totals are far off, stop here and report it rather
+than importing.
+
+Then the **sanity check** compares the import with TV Time's own numbers, to catch lost history
+before you trust it:
+
+```
+Sanity check against TV Time:
+  Watch rows without an episode id (cannot be imported): export 1: 0, export 2: 3
+  Episodes seen according to TV Time (nb_episodes_seen): 8,912
+  Distinct episodes imported for those shows:            8,905
+  Shows with fewer imported episodes than TV Time counted: 2
+    Some Show (tvdb 123456): 40 imported, TV Time says 45
+    …
+```
+
+- **Watch rows without an episode id** — rows of TV Time's watch file that name no episode, per
+  export. They can't be imported. A few is normal; hundreds means the export is not what the
+  importer expects — report it.
+- **Episodes seen according to TV Time** — the sum of each show's `nb_episodes_seen` (from
+  `user_tv_show_data.csv`; the larger of the two exports per show). If your export has no such
+  column, the line says the totals can't be cross-checked.
+- **Distinct episodes imported** — for those same shows, how many different episodes have at least
+  one watch in the import (rewatches count once). It should be close to the line above.
+- **Shows with fewer imported episodes** — up to 10 shows where the import has fewer episodes than
+  TV Time counted, biggest gap first (the count says how many there are in all). Each one means TV
+  Time's counter is higher than the watches its export lists for that show. Check those shows in
+  the app after the import; if history is clearly missing, report it before relying on the import.
 
 If the dry run stops with an error instead:
 
 - `TMDB rejected the API key` — fix `TMDB_API_KEY` in `.env`, then `docker compose up -d` and retry.
-- `<file>.csv: missing required column "<name>"` (or `not an integer`, `Unrecognised date`) — the
+- `Could not reach TMDB, even after retries` — the internet connection dropped for more than a few
+  seconds (each request is retried 3 times). Nothing was written; just run the command again.
+- `…/tracking-prod-records-v2.csv not found — is --dir pointing at the export folder?` — the folder
+  given to `--dir1`/`--dir2` is not the unzipped export (the one that directly contains the `.csv`
+  files). Check the folder names in `gdpr-data`.
+- `<file>.csv: missing required column "<name>"` (or `line <n>: row is too short`,
+  `not an integer`, `Unrecognised date`) — the
   importer was built and tested against made-up sample files shaped like a TV Time export, and your
   real export differs somewhere. The message names the file and the column: please report that
   message (nothing was written to the database).
@@ -227,8 +261,10 @@ If the dry run stops with an error instead:
 docker compose exec app npm run import -- --dir1 "/gdpr-data/gdpr-data 1" --dir2 "/gdpr-data/gdpr-data 2"
 ```
 
-It ends with `Import complete.` It's safe to run again: already-imported watches are skipped
-(counted in `skippedExisting`). Avoid using the app while an import is running.
+It ends with `Import complete.` and the same table and sanity check. It's safe to run again:
+already-imported watches are skipped (counted in `skippedExisting`), and a re-run only **adds**
+history — it doesn't change shows and movies that are already in the app (followed, archived,
+watchlist stay as you set them). Avoid using the app while an import is running.
 
 **Finally, fix what didn't match:** in the app, go to **Settings → Fix imports** (`/fix-imports`).
 Each unmatched show, movie or episode is listed there; pick the right TMDB title (or dismiss it).
