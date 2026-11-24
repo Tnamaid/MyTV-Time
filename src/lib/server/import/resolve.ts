@@ -23,7 +23,72 @@ export type ImportReport = {
 	watchlist: number;
 	/** Watch inserts that hit ON CONFLICT(import_key), i.e. already imported. */
 	skippedExisting: number;
+	/** Cross-checks against TV Time's own numbers, to spot lost history before trusting the import. */
+	sanity: ImportSanity;
 };
+
+export type ImportSanity = {
+	/** Per export: watch-/rewatch- rows with no ep_id, which cannot be imported. */
+	skippedRowsNoEpisodeId: { tvtime1: number; tvtime2: number };
+	/** Sum of nb_episodes_seen over the shows that have one (max of the two exports); null if none has. */
+	expectedEpisodesSeen: number | null;
+	/** Distinct episodes (raw tvdb episode ids) in this import, over those same shows. */
+	importedDistinctEpisodes: number;
+	/** Shows with fewer distinct imported episodes than nb_episodes_seen, biggest gap first (max 10). */
+	showsBelowExpected: { name: string; tvdbId: number; imported: number; expected: number }[];
+	showsBelowExpectedTotal: number;
+};
+
+const SANITY_LIST_MAX = 10;
+
+function sanityOf(bundle: ImportBundle, shows: Map<number, ImportShow>, bySeries: Map<number, ImportEpisodeWatch[]>): ImportSanity {
+	let expected: number | null = null;
+	let imported = 0;
+	const below: ImportSanity['showsBelowExpected'] = [];
+	for (const s of shows.values()) {
+		if (s.nbEpisodesSeen === null || s.nbEpisodesSeen === undefined) continue;
+		const distinct = new Set((bySeries.get(s.tvdbId) ?? []).map((w) => w.tvdbEpisodeId)).size;
+		expected = (expected ?? 0) + s.nbEpisodesSeen;
+		imported += distinct;
+		if (distinct < s.nbEpisodesSeen)
+			below.push({ name: s.name || 'Unknown show', tvdbId: s.tvdbId, imported: distinct, expected: s.nbEpisodesSeen });
+	}
+	below.sort((a, b) => b.expected - b.imported - (a.expected - a.imported) || a.tvdbId - b.tvdbId);
+	return {
+		skippedRowsNoEpisodeId: { tvtime1: 0, tvtime2: 0, ...bundle.skippedRowsNoEpisodeId },
+		expectedEpisodesSeen: expected,
+		importedDistinctEpisodes: imported,
+		showsBelowExpected: below.slice(0, SANITY_LIST_MAX),
+		showsBelowExpectedTotal: below.length
+	};
+}
+
+/** The sanity section as text lines, printed by the CLI after the report table. */
+export function formatSanity({ sanity: s }: ImportReport): string[] {
+	const n = (x: number) => x.toLocaleString('en-US');
+	const lines = [
+		'Sanity check against TV Time:',
+		`  Watch rows without an episode id (cannot be imported): export 1: ${n(s.skippedRowsNoEpisodeId.tvtime1)}, export 2: ${n(s.skippedRowsNoEpisodeId.tvtime2)}`
+	];
+	if (s.expectedEpisodesSeen === null) {
+		lines.push('  No nb_episodes_seen in user_tv_show_data.csv: episode totals cannot be cross-checked.');
+		return lines;
+	}
+	lines.push(
+		`  Episodes seen according to TV Time (nb_episodes_seen): ${n(s.expectedEpisodesSeen)}`,
+		`  Distinct episodes imported for those shows:            ${n(s.importedDistinctEpisodes)}`
+	);
+	if (s.showsBelowExpectedTotal === 0) {
+		lines.push('  Every show has at least as many imported episodes as TV Time counted.');
+		return lines;
+	}
+	lines.push(`  Shows with fewer imported episodes than TV Time counted: ${n(s.showsBelowExpectedTotal)}`);
+	for (const x of s.showsBelowExpected)
+		lines.push(`    ${x.name} (tvdb ${x.tvdbId}): ${n(x.imported)} imported, TV Time says ${n(x.expected)}`);
+	if (s.showsBelowExpectedTotal > s.showsBelowExpected.length)
+		lines.push(`    …and ${n(s.showsBelowExpectedTotal - s.showsBelowExpected.length)} more`);
+	return lines;
+}
 
 /**
  * Write a merged TV Time bundle into the db. TMDB failures for one show/movie
@@ -61,10 +126,6 @@ export async function runImport(
 }
 
 async function doImport(db: Db, tmdb: ImportTmdb, bundle: ImportBundle): Promise<ImportReport> {
-	const report: ImportReport = {
-		shows: 0, showsUnmatched: 0, episodeWatches: 0, episodeWatchesUnmatched: 0,
-		movies: 0, moviesUnmatched: 0, watchlist: 0, skippedExisting: 0
-	};
 
 	const bySeries = new Map<number, ImportEpisodeWatch[]>();
 	for (const w of bundle.episodeWatches) {
@@ -77,6 +138,12 @@ async function doImport(db: Db, tmdb: ImportTmdb, bundle: ImportBundle): Promise
 		if (!shows.has(tvdbId))
 			shows.set(tvdbId, { tvdbId, name: ws[0].seriesName, followed: false, archived: false, forLater: false });
 	}
+
+	const report: ImportReport = {
+		shows: 0, showsUnmatched: 0, episodeWatches: 0, episodeWatchesUnmatched: 0,
+		movies: 0, moviesUnmatched: 0, watchlist: 0, skippedExisting: 0,
+		sanity: sanityOf(bundle, shows, bySeries)
+	};
 
 	const ctx: Ctx = {
 		report,

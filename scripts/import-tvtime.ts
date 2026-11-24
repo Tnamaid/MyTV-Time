@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 import { openDb } from '../src/lib/server/db/client';
 import { mergeExports } from '../src/lib/server/import/merge';
 import { parseExport } from '../src/lib/server/import/parse';
-import { runImport } from '../src/lib/server/import/resolve';
+import { formatSanity, runImport } from '../src/lib/server/import/resolve';
 import { TmdbClient, TmdbError } from '../src/lib/server/tmdb/client';
 
 const USAGE = 'Usage: npm run import -- --dir1 <path> --dir2 <path> [--dry-run]';
@@ -35,7 +35,12 @@ const apiKey = process.env.TMDB_API_KEY;
 if (!apiKey) fail('TMDB_API_KEY is not set. Export it (see docs/INSTALL.md) and re-run.');
 
 const dryRun = values['dry-run'] === true;
-const bundle = mergeExports(parseExport(values.dir1, 'tvtime1'), parseExport(values.dir2, 'tvtime2'));
+let bundle;
+try {
+	bundle = mergeExports(parseExport(values.dir1, 'tvtime1'), parseExport(values.dir2, 'tvtime2'));
+} catch (e) {
+	fail(`Could not read the TV Time export: ${e instanceof Error ? e.message : e}\nNothing was written.`);
+}
 const db = openDb(process.env.DB_PATH || './data/tracker.db');
 let report;
 try {
@@ -50,5 +55,7 @@ try {
 	process.exit(1);
 }
 console.log(dryRun ? 'DRY RUN — nothing was written.' : 'Import complete.');
-console.table(report);
+const { sanity: _sanity, ...counts } = report;
+console.table(counts);
+console.log(formatSanity(report).join('\n'));
 db.$client.close();

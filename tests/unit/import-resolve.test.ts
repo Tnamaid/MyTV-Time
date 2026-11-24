@@ -4,7 +4,7 @@ import { openDb, type Db } from '../../src/lib/server/db/client';
 import { episode, importIssue, title, watch, watchlist } from '../../src/lib/server/db/schema';
 import type { ImportBundle, ImportEpisodeWatch, ImportMovie, ImportShow } from '../../src/lib/server/import/merge';
 import { addSeries } from '../../src/lib/server/titles/service';
-import { normaliseTitle, runImport } from '../../src/lib/server/import/resolve';
+import { formatSanity, normaliseTitle, runImport } from '../../src/lib/server/import/resolve';
 import { TmdbError, type MovieSearchResult } from '../../src/lib/server/tmdb/client';
 import { ep, fakeTmdb, show } from './fakeTmdb';
 
@@ -120,8 +120,54 @@ test('report counts on a fresh import', async () => {
 		movies: 4,
 		moviesUnmatched: 1, // Twin
 		watchlist: 2, // Gamma (show for_later) + Later (movie for_later)
-		skippedExisting: 0
+		skippedExisting: 0,
+		sanity: {
+			skippedRowsNoEpisodeId: { tvtime1: 0, tvtime2: 0 },
+			expectedEpisodesSeen: null, // no show has nb_episodes_seen
+			importedDistinctEpisodes: 0,
+			showsBelowExpected: [],
+			showsBelowExpectedTotal: 0
+		}
 	});
+});
+
+test('sanity: skipped rows, nb_episodes_seen vs distinct imported episodes, short shows', async () => {
+	const db = openDb(':memory:');
+	const bundle = makeBundle();
+	const set = (id: number, nb: number) => bundle.shows.set(id, { ...bundle.shows.get(id)!, nbEpisodesSeen: nb });
+	set(100, 2); // Alpha: 2 distinct imported -> fine
+	set(200, 3); // Unknown Show (unmatched): 2 imported -> short by 1
+	set(400, 5); // Delta: 2 imported -> short by 3
+	set(300, 0); // Gamma: 0 / 0
+	// a rewatch of Alpha S1E1 counts once
+	bundle.episodeWatches.push({ ...bundle.episodeWatches[0], watchedAt: '2022-01-01T00:00:00Z', importKey: 'ep:8001:2022-01-01T00:00', isRewatch: true });
+	bundle.skippedRowsNoEpisodeId = { tvtime1: 2, tvtime2: 1 };
+	const r = await runImport(db, makeTmdb(), bundle, { dryRun: false });
+	expect(r.sanity).toEqual({
+		skippedRowsNoEpisodeId: { tvtime1: 2, tvtime2: 1 },
+		expectedEpisodesSeen: 10,
+		importedDistinctEpisodes: 6, // over the 4 shows that have nb_episodes_seen
+		showsBelowExpected: [
+			{ name: 'Delta', tvdbId: 400, imported: 2, expected: 5 },
+			{ name: 'Unknown Show', tvdbId: 200, imported: 2, expected: 3 }
+		],
+		showsBelowExpectedTotal: 2
+	});
+	const text = formatSanity(r).join('\n');
+	expect(text).toContain('export 1: 2, export 2: 1');
+	expect(text).toMatch(/nb_episodes_seen.*10/);
+	expect(text).toMatch(/imported.*6/);
+	expect(text).toContain('Delta (tvdb 400): 2 imported, TV Time says 5');
+});
+
+test('sanity: lists at most 10 short shows, biggest gap first', async () => {
+	const db = openDb(':memory:');
+	const shows = new Map(Array.from({ length: 12 }, (_, i) => sh(1000 + i, `S${i}`, { nbEpisodesSeen: i + 1 })));
+	const r = await runImport(db, fakeTmdb({}), { shows, episodeWatches: [], movies: new Map() }, { dryRun: true });
+	expect(r.sanity.showsBelowExpectedTotal).toBe(12);
+	expect(r.sanity.showsBelowExpected).toHaveLength(10);
+	expect(r.sanity.showsBelowExpected[0]).toEqual({ name: 'S11', tvdbId: 1011, imported: 0, expected: 12 });
+	expect(formatSanity(r).join('\n')).toContain('…and 2 more');
 });
 
 test('running twice does not duplicate watches or issues (Review Focus 1)', async () => {
