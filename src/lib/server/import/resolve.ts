@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { episode, importIssue, title, watch } from '../db/schema';
-import type { TmdbClient } from '../tmdb/client';
+import { TmdbError, type TmdbClient } from '../tmdb/client';
 import { addMovie, addSeries, addToWatchlist, setArchived } from '../titles/service';
 import type { TmdbLike } from '../titles/sync';
 import type { ImportBundle, ImportEpisodeWatch, ImportMovie, ImportShow } from './merge';
@@ -24,18 +24,28 @@ export type ImportReport = {
 	skippedExisting: number;
 };
 
-const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/**
+ * Per-title errors become import issues; anything else aborts the run:
+ * TMDB 401/403 (bad key/config) and non-TmdbErrors (bugs, network down).
+ */
+function recoverable(e: unknown): string {
+	if (e instanceof TmdbError && e.status !== 401 && e.status !== 403) return e.message;
+	throw e;
+}
 
 /**
  * Write a merged TV Time bundle into the db. TMDB failures for one show/movie
- * are recorded as import issues and never abort the run; every watch is
+ * (any TmdbError except 401/403) are recorded as import issues and the run
+ * continues; 401/403 and non-TmdbErrors abort and roll back. Every watch is
  * stored (with its raw TV Time fields) whether or not it could be linked.
  * Re-runnable: watches dedupe on import_key, issues on key.
  *
- * dryRun: everything (TMDB lookups included) runs inside a manual
- * transaction that is always rolled back. Nested db.transaction() calls
- * become SAVEPOINTs on the same better-sqlite3 connection. Nothing else may
- * use this connection while a dry run is in flight.
+ * The whole run is one manual transaction on the connection: COMMIT at the
+ * end, ROLLBACK on any thrown error (so an aborted run leaves the db
+ * unchanged), and always ROLLBACK for dryRun (TMDB lookups still happen).
+ * Nested db.transaction() calls become SAVEPOINTs on the same
+ * better-sqlite3 connection. Nothing else may use this connection while a
+ * run is in flight.
  */
 export async function runImport(
 	db: Db,
@@ -43,12 +53,14 @@ export async function runImport(
 	bundle: ImportBundle,
 	opts: { dryRun: boolean }
 ): Promise<ImportReport> {
-	if (!opts.dryRun) return doImport(db, tmdb, bundle);
-	db.$client.exec('BEGIN');
+	const conn = db.$client;
+	conn.exec('BEGIN');
 	try {
-		return await doImport(db, tmdb, bundle);
+		const report = await doImport(db, tmdb, bundle);
+		conn.exec(opts.dryRun ? 'ROLLBACK' : 'COMMIT');
+		return report;
 	} finally {
-		if (db.$client.inTransaction) db.$client.exec('ROLLBACK');
+		if (conn.inTransaction) conn.exec('ROLLBACK');
 	}
 }
 
@@ -101,7 +113,7 @@ async function importShow(db: Db, tmdb: ImportTmdb, s: ImportShow, ws: ImportEpi
 		const tmdbId = await tmdb.findByTvdb(s.tvdbId);
 		if (tmdbId !== null) titleId = await addSeries(db, tmdb, tmdbId, { follow: s.followed, tvdbId: s.tvdbId });
 	} catch (e) {
-		error = errText(e);
+		error = recoverable(e);
 	}
 
 	const resolved =
@@ -176,7 +188,7 @@ async function resolveEpisodes(
 			e.tvdbId = tvdb_id;
 		}
 	} catch (err) {
-		error = errText(err);
+		error = recoverable(err);
 	}
 	const byTvdb = new Map(eps.filter((e) => e.tvdbId !== null).map((e) => [e.tvdbId!, e.id]));
 	for (const w of misses) out.set(w, byTvdb.get(w.tvdbEpisodeId) ?? null);
@@ -194,7 +206,7 @@ async function importMovie(db: Db, tmdb: ImportTmdb, m: ImportMovie, report: Imp
 		if (pick.match) titleId = await addMovie(db, tmdb, pick.match.id);
 		else candidates = pick.candidates;
 	} catch (e) {
-		error = errText(e);
+		error = recoverable(e);
 	}
 
 	db.transaction(() => {

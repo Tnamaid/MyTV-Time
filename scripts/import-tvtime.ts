@@ -9,7 +9,7 @@ import { openDb } from '../src/lib/server/db/client';
 import { mergeExports } from '../src/lib/server/import/merge';
 import { parseExport } from '../src/lib/server/import/parse';
 import { runImport } from '../src/lib/server/import/resolve';
-import { TmdbClient } from '../src/lib/server/tmdb/client';
+import { TmdbClient, TmdbError } from '../src/lib/server/tmdb/client';
 
 const USAGE = 'Usage: npm run import -- --dir1 <path> --dir2 <path> [--dry-run]';
 
@@ -37,7 +37,16 @@ if (!apiKey) fail('TMDB_API_KEY is not set. Export it (see docs/INSTALL.md) and 
 const dryRun = values['dry-run'] === true;
 const bundle = mergeExports(parseExport(values.dir1, 'tvtime1'), parseExport(values.dir2, 'tvtime2'));
 const db = openDb(process.env.DB_PATH || './data/tracker.db');
-const report = await runImport(db, new TmdbClient(apiKey), bundle, { dryRun });
+let report;
+try {
+	report = await runImport(db, new TmdbClient(apiKey), bundle, { dryRun });
+} catch (e) {
+	db.$client.close();
+	if (e instanceof TmdbError && (e.status === 401 || e.status === 403))
+		fail(`TMDB rejected the API key (${e.status}) — check TMDB_API_KEY. Nothing was written.`);
+	console.error('Import aborted, nothing was written:', e);
+	process.exit(1);
+}
 console.log(dryRun ? 'DRY RUN — nothing was written.' : 'Import complete.');
 console.table(report);
 db.$client.close();

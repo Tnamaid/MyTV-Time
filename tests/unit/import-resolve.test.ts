@@ -4,7 +4,7 @@ import { openDb, type Db } from '../../src/lib/server/db/client';
 import { episode, importIssue, title, watch, watchlist } from '../../src/lib/server/db/schema';
 import type { ImportBundle, ImportEpisodeWatch, ImportMovie, ImportShow } from '../../src/lib/server/import/merge';
 import { normaliseTitle, runImport } from '../../src/lib/server/import/resolve';
-import type { MovieSearchResult } from '../../src/lib/server/tmdb/client';
+import { TmdbError, type MovieSearchResult } from '../../src/lib/server/tmdb/client';
 import { ep, fakeTmdb, show } from './fakeTmdb';
 
 const sh = (tvdbId: number, name: string, over: Partial<ImportShow> = {}): [number, ImportShow] => [
@@ -40,7 +40,7 @@ const movieDetails = (id: number, t: string, date: string) => ({
 
 function makeTmdb() {
 	return fakeTmdb({
-		tvdb: { 100: 1, 300: 3, 400: 4, 500: new Error('boom 500') },
+		tvdb: { 100: 1, 300: 3, 400: 4, 500: new TmdbError(500, 'boom 500') },
 		shows: {
 			1: show({ id: 1, name: 'Alpha', external_ids: { tvdb_id: 100 } }),
 			3: show({ id: 3, name: 'Gamma', external_ids: { tvdb_id: 300 } }),
@@ -219,7 +219,7 @@ test('TMDB error on a movie search does not abort the import', async () => {
 	const t = makeTmdb();
 	const orig = t.searchMovie;
 	t.searchMovie = async (q, y) => {
-		if (q === 'Amélie!') throw new Error('search down');
+		if (q === 'Amélie!') throw new TmdbError(503, 'search down');
 		return orig(q, y);
 	};
 	const r = await runImport(db, t, makeBundle(), { dryRun: false });
@@ -303,4 +303,64 @@ test('dryRun rolls back even when the import throws', async () => {
 	await expect(runImport(db, makeTmdb(), bundle, { dryRun: true })).rejects.toThrow();
 	expect(db.$client.inTransaction).toBe(false);
 	expect(counts(db)).toEqual({ title: 0, watch: 0, issue: 0, watchlist: 0, episode: 0 });
+});
+
+const empty = { title: 0, watch: 0, issue: 0, watchlist: 0, episode: 0 };
+
+test.each([401, 403])('TMDB %i on the first show aborts the run and leaves the DB unchanged', async (status) => {
+	const db = openDb(':memory:');
+	const t = makeTmdb();
+	t.findByTvdb = async () => {
+		throw new TmdbError(status);
+	};
+	await expect(runImport(db, t, makeBundle(), { dryRun: false })).rejects.toMatchObject({ status });
+	expect(db.$client.inTransaction).toBe(false);
+	expect(counts(db)).toEqual(empty);
+});
+
+test('auth error late in the run rolls back earlier writes; prior data untouched', async () => {
+	const db = openDb(':memory:');
+	await runImport(db, makeTmdb(), makeBundle(), { dryRun: false });
+	const before = counts(db);
+	const t = makeTmdb();
+	t.searchMovie = async () => {
+		throw new TmdbError(401);
+	};
+	const bundle = makeBundle();
+	bundle.shows.set(999, { tvdbId: 999, name: 'New', followed: false, archived: false, forLater: false });
+	await expect(runImport(db, t, bundle, { dryRun: false })).rejects.toBeInstanceOf(TmdbError);
+	expect(counts(db)).toEqual(before);
+	expect(db.select().from(importIssue).where(eq(importIssue.key, 'show:999')).get()).toBeUndefined();
+});
+
+test('auth error during episode fallback aborts too', async () => {
+	const db = openDb(':memory:');
+	const t = makeTmdb();
+	t.getEpisodeExternalIds = async () => {
+		throw new TmdbError(401);
+	};
+	await expect(runImport(db, t, makeBundle(), { dryRun: false })).rejects.toBeInstanceOf(TmdbError);
+	expect(counts(db)).toEqual(empty);
+});
+
+test('non-TmdbError (programming/network error) aborts instead of becoming an issue', async () => {
+	const db = openDb(':memory:');
+	const t = makeTmdb();
+	t.findByTvdb = async () => {
+		throw new TypeError('fetch failed');
+	};
+	await expect(runImport(db, t, makeBundle(), { dryRun: false })).rejects.toThrow('fetch failed');
+	expect(counts(db)).toEqual(empty);
+});
+
+test('other TmdbErrors (e.g. 404/500) stay per-title issues', async () => {
+	const db = openDb(':memory:');
+	const t = makeTmdb();
+	t.getMovie = async () => {
+		throw new TmdbError(404);
+	};
+	const r = await runImport(db, t, makeBundle(), { dryRun: false });
+	expect(r.moviesUnmatched).toBe(4);
+	expect(db.select().from(importIssue).where(eq(importIssue.key, 'movie:u-amelie')).get()!.label).toContain('404');
+	expect(db.$client.inTransaction).toBe(false);
 });
