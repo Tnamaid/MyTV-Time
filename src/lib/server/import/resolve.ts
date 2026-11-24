@@ -5,7 +5,7 @@ import type { TmdbClient } from '../tmdb/client';
 import { addMovie, addSeries, addToWatchlist, setArchived } from '../titles/service';
 import type { TmdbLike } from '../titles/sync';
 import type { ImportBundle, ImportEpisodeWatch, ImportMovie, ImportShow } from './merge';
-import { episodeIssueLabel, recoverable, resolveEpisodes } from './link';
+import { episodeIssueKey, episodeIssueLabel, episodeIssueMeta, recoverable, resolveEpisodes } from './link';
 import { pickMovie, type MovieCandidate } from './movieMatch';
 
 export { normaliseTitle } from './movieMatch';
@@ -153,10 +153,7 @@ async function importShow(db: Db, tmdb: ImportTmdb, s: ImportShow, ws: ImportEpi
 			}, report);
 		}
 		for (const [season, count] of unmatchedBySeason) {
-			insertIssue(db, 'episode', `episode:${s.tvdbId}:${season}`, episodeIssueLabel(s.name, s.tvdbId, season, count, resolved.error), {
-				tvdbId: s.tvdbId,
-				rawSeason: season
-			});
+			insertIssue(db, 'episode', episodeIssueKey(s.tvdbId, season), episodeIssueLabel(s.name, s.tvdbId, season, count, resolved.error), episodeIssueMeta(s.tvdbId, season));
 		}
 	});
 }

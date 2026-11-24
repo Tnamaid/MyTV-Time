@@ -67,3 +67,7 @@ export async function resolveEpisodes<T extends RawEpisode>(
 	for (const w of misses) out.set(w, byTvdb.get(w.tvdbEpisodeId) ?? null);
 	return { ids: out, error };
 }
+
+/** Key and meta of an `episode` import issue; one definition for importer and fixer. */
+export const episodeIssueKey = (tvdbId: number, season: number) => `episode:${tvdbId}:${season}`;
+export const episodeIssueMeta = (tvdbId: number, season: number) => ({ tvdbId, rawSeason: season });

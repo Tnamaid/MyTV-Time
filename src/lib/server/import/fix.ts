@@ -1,8 +1,8 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { episode, importIssue, title, watch } from '../db/schema';
 import { addMovie, addSeries, addToWatchlist, setArchived } from '../titles/service';
-import { episodeIssueLabel, resolveEpisodes } from './link';
+import { episodeIssueKey, episodeIssueLabel, episodeIssueMeta, resolveEpisodes } from './link';
 import type { MovieCandidate } from './movieMatch';
 import type { ImportTmdb } from './resolve';
 
@@ -80,9 +80,9 @@ export async function fixShow(db: Db, tmdb: ImportTmdb, issueKey: string, tmdbId
 			db.insert(importIssue)
 				.values({
 					kind: 'episode',
-					key: `episode:${meta.tvdbId}:${season}`,
+					key: episodeIssueKey(meta.tvdbId, season),
 					label: episodeIssueLabel(meta.name, meta.tvdbId, season, count, resolved.error),
-					metaJson: JSON.stringify({ tvdbId: meta.tvdbId, rawSeason: season }),
+					metaJson: JSON.stringify(episodeIssueMeta(meta.tvdbId, season)),
 					createdAt: new Date().toISOString()
 				})
 				.onConflictDoNothing({ target: importIssue.key })
@@ -127,9 +127,15 @@ export function fixEpisodes(
 		}
 		const unlinked = ws.length - linked;
 		if (unlinked === 0) {
+			// The importer keys issues by the raw TV Time id, which may differ from title.tvdb_id.
+			const raw = db
+				.select({ id: watch.rawTvdbSeriesId })
+				.from(watch)
+				.where(and(eq(watch.titleId, titleId), eq(watch.rawSeason, rawSeason), isNotNull(watch.rawTvdbSeriesId)))
+				.get();
 			const t = db.select({ tvdbId: title.tvdbId }).from(title).where(eq(title.id, titleId)).get();
-			const tvdbId = t?.tvdbId ?? ws.find((w) => w.rawTvdbSeriesId !== null)?.rawTvdbSeriesId ?? null;
-			if (tvdbId !== null) resolveIssue(db, `episode:${tvdbId}:${rawSeason}`);
+			const tvdbId = raw?.id ?? t?.tvdbId ?? null;
+			if (tvdbId !== null) resolveIssue(db, episodeIssueKey(tvdbId, rawSeason));
 		}
 		return { linked, unlinked };
 	});

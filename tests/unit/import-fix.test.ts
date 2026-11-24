@@ -7,6 +7,7 @@ import { runImport } from '../../src/lib/server/import/resolve';
 import {
 	dismissIssue, fixEpisodes, fixMovie, fixShow, listOpenIssues, previewEpisodeMapping
 } from '../../src/lib/server/import/fix';
+import { addSeries } from '../../src/lib/server/titles/service';
 import { ep, fakeTmdb, show } from './fakeTmdb';
 
 const sh = (tvdbId: number, name: string, over: Partial<ImportShow> = {}): [number, ImportShow] => [
@@ -157,4 +158,16 @@ test('dismissIssue keeps watches untouched; unknown keys throw', async () => {
 	expect(() => dismissIssue(db, 'show:999')).toThrow();
 	await expect(fixShow(db, fixTmdb(), 'show:999', 1)).rejects.toThrow();
 	await expect(fixMovie(db, fixTmdb(), 'movie:nope', 1)).rejects.toThrow();
+});
+
+test('fixEpisodes resolves the issue by the raw tvdb id even when the title carries a different tvdb id', async () => {
+	const db = await seed();
+	const tmdb = fixTmdb();
+	const titleId = await addSeries(db, tmdb, 20);
+	db.update(title).set({ tvdbId: 999 }).where(eq(title.id, titleId)).run();
+	await fixShow(db, tmdb, 'show:200', 20);
+	expect(db.select().from(title).where(eq(title.id, titleId)).get()!.tvdbId).toBe(999);
+	expect(issue(db, 'episode:200:3').resolved).toBe(false);
+	expect(fixEpisodes(db, titleId, 3, { targetSeason: 1, offset: 0 })).toEqual({ linked: 1, unlinked: 0 });
+	expect(issue(db, 'episode:200:3').resolved).toBe(true);
 });
