@@ -138,14 +138,24 @@ TZ=Europe/Paris
 
 Leave `DB_PATH` commented out: with Docker the database is always `data/tracker.db` in this folder.
 
+**Linux only:** also uncomment `UID` and `GID` and set them to the numbers printed by `id -u` and
+`id -g` (usually both `1000`). The app then runs as you, so the files it writes in `data/` (database,
+backups) belong to you and not to `root` — you can copy, back up and delete them without `sudo`.
+(Bash's `$UID` isn't passed to Docker Compose, so put the values in `.env`.) On Windows, leave them out.
+
 ## 6. Start the app
 
-Also create the folder for your TV Time exports (used in step 8):
+Create the `data` folder (where the database lives) and the folder for your TV Time exports
+(used in step 8), then start:
 
 ```bash
+mkdir data
 mkdir gdpr-data
 docker compose up -d
 ```
+
+(On Linux, create `data` yourself before the first start: if it is missing, Docker creates it owned
+by `root` and the app, which runs as you, can't write its database there.)
 
 The first start builds the app and takes a few minutes. When it's done:
 
@@ -323,11 +333,17 @@ twice the same day overwrites that day's file). A backup file is a complete data
 
 **Linux — nightly with cron**
 
-Run `crontab -e` and add (adjust paths; `~/OneDrive` = any folder synced by your cloud client):
+Run `crontab -e` and add this as **one line** (adjust paths; `~/OneDrive/mytv-time` = any folder
+synced by your cloud client, created if missing). Like the Windows script, it copies the newest
+backup there and keeps 30 days, locally and in the synced folder:
 
 ```cron
-30 3 * * * cd $HOME/mytv-time && docker compose exec -T app npm run backup -- /data/backups/ && cp data/backups/tracker-$(date -u +\%F).db $HOME/OneDrive/mytv-time/ && find data/backups -name 'tracker-*.db' -mtime +30 -delete
+30 3 * * * cd $HOME/mytv-time && docker compose exec -T app npm run backup -- /data/backups/ && mkdir -p $HOME/OneDrive/mytv-time && cp "$(ls -t data/backups/tracker-*.db | head -n 1)" $HOME/OneDrive/mytv-time/ && find data/backups $HOME/OneDrive/mytv-time -name 'tracker-*.db' -mtime +30 -delete
 ```
+
+This needs the `UID`/`GID` lines from step 5: otherwise the backups in `data/backups` belong to
+`root` and the cleanup at the end fails. If you already started the app without them, fix the
+owner once: `sudo chown -R "$(id -u):$(id -g)" data`, then `docker compose up -d`.
 
 (If you have the `sqlite3` tool installed, `sqlite3 data/tracker.db ".backup backup.db"` does the same
 as the backup command.)
@@ -369,6 +385,10 @@ automatically when it starts.
   `http://127.0.0.1:3000`.
 - **"port is already allocated"** on start — something else on the PC uses port 3000. Change the
   first `3000` in `docker-compose.yml` (`"127.0.0.1:3001:3000"`) and run `tailscale serve --bg 3001`.
+- **Linux: "attempt to write a readonly database" / "EACCES" / "permission denied" on `/data`** —
+  the `data` folder (or files in it) belongs to `root`, from a start before `UID`/`GID` were set in
+  `.env`, or because Docker created the folder. Fix it once: `sudo chown -R "$(id -u):$(id -g)" data`,
+  check `UID`/`GID` in `.env` (step 5), then `docker compose up -d`.
 - **Windows: "database is locked" or "disk I/O error" in the logs** — move the project into the WSL
   Linux filesystem (in the Ubuntu app: `git clone … ~/mytv-time`, copy `data/` and `.env` across,
   and run the `docker compose` commands from there).

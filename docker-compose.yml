@@ -2,6 +2,10 @@
 services:
   app:
     build: .
+    # Run as your own user, so the files in ./data belong to you (on Linux the container would
+    # otherwise create them as root). Linux: set UID/GID in .env (see .env.example).
+    # Windows (Docker Desktop): leave them out; the 1000:1000 default is harmless there.
+    user: "${UID:-1000}:${GID:-1000}"
     env_file: .env
     environment:
       # These win over .env: the database must live in the ./data volume, or it is lost on rebuild.
