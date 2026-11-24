@@ -62,6 +62,15 @@ You need:
 
 Log in at the PC's screen with your username and password, then:
 
+If the software selection screen only offered "standard system utilities" (no "SSH server" line),
+install the SSH server now:
+
+```bash
+sudo apt update
+sudo apt install -y openssh-server
+sudo systemctl enable --now ssh
+```
+
 ```bash
 # find the PC's local IP address: the line starting with "wl…" (your Wi-Fi card) shows
 # "UP" and an address like 192.168.1.42/24 — the IP is the part before the "/"
