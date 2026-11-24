@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { openDb, type Db } from '../../src/lib/server/db/client';
 import { episode, importIssue, title, watch, watchlist } from '../../src/lib/server/db/schema';
 import type { ImportBundle, ImportEpisodeWatch, ImportMovie, ImportShow } from '../../src/lib/server/import/merge';
@@ -133,7 +133,8 @@ test('running twice does not duplicate watches or issues (Review Focus 1)', asyn
 	const totalWatchRows = 7 + 1 + 2 + 1; // episodes + Amelie + Twin x2 + Nada
 	expect(before.watch).toBe(totalWatchRows);
 	expect(first.skippedExisting).toBe(0);
-	expect(second).toEqual({ ...first, skippedExisting: totalWatchRows });
+	// watchlist counts additions actually applied: none on a re-run (titles already existed)
+	expect(second).toEqual({ ...first, skippedExisting: totalWatchRows, watchlist: 0 });
 });
 
 test('unknown tvdb id -> show issue, watches kept with raw fields and null title_id', async () => {
@@ -485,4 +486,51 @@ describe('tvdb fallback sweep is limited to the seasons with misses', () => {
 		const e = db.select().from(episode).where(eq(episode.id, w.episodeId!)).get()!;
 		expect([e.seasonNumber, e.episodeNumber]).toEqual([1, 2]);
 	});
+});
+
+test('re-run after using the app does not re-set followed/archived/watchlist (titles that already existed)', async () => {
+	const db = openDb(':memory:');
+	await runImport(db, makeTmdb(), makeBundle(), { dryRun: false });
+	const byTmdb = (kind: 'series' | 'movie', id: number) =>
+		db.select().from(title).where(and(eq(title.kind, kind), eq(title.tmdbId, id))).get()!;
+	const alpha = byTmdb('series', 1); // imported followed + archived
+	const delta = byTmdb('series', 4); // imported followed
+	// Gamma (series) and Later (movie) were imported for_later -> on the watchlist
+	// the owner then uses the app
+	db.update(title).set({ followed: false, archived: false }).where(eq(title.id, alpha.id)).run();
+	db.update(title).set({ followed: false }).where(eq(title.id, delta.id)).run();
+	db.delete(watchlist).run();
+
+	const r = await runImport(db, makeTmdb(), makeBundle(), { dryRun: false });
+	expect([byTmdb('series', 1).followed, byTmdb('series', 1).archived]).toEqual([false, false]);
+	expect(byTmdb('series', 4).followed).toBe(false);
+	expect(db.select().from(watchlist).all()).toEqual([]);
+	expect(r.watchlist).toBe(0);
+});
+
+test('a title the owner added in the app before the import keeps its flags', async () => {
+	const db = openDb(':memory:');
+	const t = makeTmdb();
+	const alphaId = await addSeries(db, t, 1); // added from search, not followed
+	await runImport(db, t, makeBundle(), { dryRun: false });
+	const alpha = db.select().from(title).where(eq(title.id, alphaId)).get()!;
+	expect([alpha.followed, alpha.archived]).toEqual([false, false]);
+	expect(alpha.tvdbId).toBe(100); // still learns the tvdb id
+	// its watches are still imported and linked
+	expect(db.select().from(watch).where(eq(watch.titleId, alphaId)).all()).toHaveLength(2);
+});
+
+test('two TV Time shows on the same new TMDB title in one run both apply their flags', async () => {
+	const db = openDb(':memory:');
+	const t = makeTmdb();
+	const orig = t.findByTvdb;
+	t.findByTvdb = async (id) => (id === 101 ? 1 : orig(id));
+	const bundle: ImportBundle = {
+		shows: new Map([sh(100, 'Alpha'), sh(101, 'Alpha again', { followed: true, archived: true })]),
+		episodeWatches: [],
+		movies: new Map()
+	};
+	await runImport(db, t, bundle, { dryRun: false });
+	const alpha = db.select().from(title).where(eq(title.tmdbId, 1)).get()!;
+	expect([alpha.followed, alpha.archived]).toEqual([true, true]);
 });

@@ -1,8 +1,8 @@
 import { eq } from 'drizzle-orm';
 import type { Db } from '../db/client';
-import { importIssue, watch } from '../db/schema';
+import { importIssue, title, watch } from '../db/schema';
 import type { TmdbClient } from '../tmdb/client';
-import { addMovie, addSeries, addToWatchlist, setArchived } from '../titles/service';
+import { addMovie, addSeries, addToWatchlist, setArchived, setFollowed } from '../titles/service';
 import type { TmdbLike } from '../titles/sync';
 import type { ImportBundle, ImportEpisodeWatch, ImportMovie, ImportShow } from './merge';
 import { episodeIssueKey, episodeIssueLabel, episodeIssueMeta, recoverable, resolveEpisodes } from './link';
@@ -19,7 +19,7 @@ export type ImportReport = {
 	episodeWatchesUnmatched: number;
 	movies: number;
 	moviesUnmatched: number;
-	/** Watchlist additions requested this run (matched for_later items); idempotent, so re-runs report the same number. */
+	/** Watchlist additions made this run (matched for_later items on titles this run created). */
 	watchlist: number;
 	/** Watch inserts that hit ON CONFLICT(import_key), i.e. already imported. */
 	skippedExisting: number;
@@ -31,7 +31,10 @@ export type ImportReport = {
  * issues and the run continues; 401/403, status 0 (network down after the
  * client's retries) and non-TmdbErrors abort and roll back. Every watch is
  * stored (with its raw TV Time fields) whether or not it could be linked.
- * Re-runnable: watches dedupe on import_key, issues on key.
+ * Re-runnable: watches dedupe on import_key, issues on key. TV Time's
+ * followed/archived/for_later flags are applied only to titles this run
+ * created: a title that existed before the run (an earlier import, or added
+ * in the app) keeps the state the owner gave it, so re-runs only add history.
  *
  * The whole run is one manual transaction on the connection: COMMIT at the
  * end, ROLLBACK on any thrown error (so an aborted run leaves the db
@@ -75,10 +78,20 @@ async function doImport(db: Db, tmdb: ImportTmdb, bundle: ImportBundle): Promise
 			shows.set(tvdbId, { tvdbId, name: ws[0].seriesName, followed: false, archived: false, forLater: false });
 	}
 
-	for (const s of shows.values()) await importShow(db, tmdb, s, bySeries.get(s.tvdbId) ?? [], report);
-	for (const m of bundle.movies.values()) await importMovie(db, tmdb, m, report);
+	const ctx: Ctx = {
+		report,
+		preexisting: new Set(db.select({ id: title.id }).from(title).all().map((t) => t.id))
+	};
+	for (const s of shows.values()) await importShow(db, tmdb, s, bySeries.get(s.tvdbId) ?? [], ctx);
+	for (const m of bundle.movies.values()) await importMovie(db, tmdb, m, ctx);
 	return report;
 }
+
+type Ctx = {
+	report: ImportReport;
+	/** Title ids that existed before this run: their flags/watchlist are never touched. */
+	preexisting: Set<number>;
+};
 
 /**
  * Insert an issue once per key. On re-run, an unresolved issue gets its
@@ -109,7 +122,7 @@ function insertWatch(db: Db, row: typeof watch.$inferInsert, report: ImportRepor
 	if (r.changes === 0) report.skippedExisting++;
 }
 
-async function importShow(db: Db, tmdb: ImportTmdb, s: ImportShow, ws: ImportEpisodeWatch[], report: ImportReport) {
+async function importShow(db: Db, tmdb: ImportTmdb, s: ImportShow, ws: ImportEpisodeWatch[], { report, preexisting }: Ctx) {
 	report.shows++;
 	report.episodeWatches += ws.length;
 
@@ -117,7 +130,8 @@ async function importShow(db: Db, tmdb: ImportTmdb, s: ImportShow, ws: ImportEpi
 	let error: string | null = null;
 	try {
 		const tmdbId = await tmdb.findByTvdb(s.tvdbId);
-		if (tmdbId !== null) titleId = await addSeries(db, tmdb, tmdbId, { follow: s.followed, tvdbId: s.tvdbId });
+		// follow is applied below, only for a title this run created.
+		if (tmdbId !== null) titleId = await addSeries(db, tmdb, tmdbId, { tvdbId: s.tvdbId });
 	} catch (e) {
 		error = recoverable(e);
 	}
@@ -132,7 +146,8 @@ async function importShow(db: Db, tmdb: ImportTmdb, s: ImportShow, ws: ImportEpi
 			report.showsUnmatched++;
 			const meta = { tvdbId: s.tvdbId, name: s.name, followed: s.followed, archived: s.archived, forLater: s.forLater };
 			insertIssue(db, 'show', `show:${s.tvdbId}`, error ? `${label} — TMDB error: ${error}` : label, meta);
-		} else {
+		} else if (!preexisting.has(titleId)) {
+			if (s.followed) setFollowed(db, titleId, true);
 			if (s.archived) setArchived(db, titleId, true);
 			if (s.forLater) {
 				addToWatchlist(db, titleId);
@@ -159,7 +174,7 @@ async function importShow(db: Db, tmdb: ImportTmdb, s: ImportShow, ws: ImportEpi
 	});
 }
 
-async function importMovie(db: Db, tmdb: ImportTmdb, m: ImportMovie, report: ImportReport) {
+async function importMovie(db: Db, tmdb: ImportTmdb, m: ImportMovie, { report, preexisting }: Ctx) {
 	report.movies++;
 	let titleId: number | null = null;
 	let candidates: MovieCandidate[] | undefined;
@@ -179,7 +194,7 @@ async function importMovie(db: Db, tmdb: ImportTmdb, m: ImportMovie, report: Imp
 			const meta = { uuid: m.uuid, name: m.name, releaseYear: m.releaseYear, forLater: m.forLater };
 			const label = `${m.name}${m.releaseYear === null ? '' : ` (${m.releaseYear})`}`;
 			insertIssue(db, 'movie', `movie:${m.uuid}`, error ? `${label} — TMDB error: ${error}` : label, meta, candidates);
-		} else if (m.forLater) {
+		} else if (m.forLater && !preexisting.has(titleId)) {
 			addToWatchlist(db, titleId);
 			report.watchlist++;
 		}
