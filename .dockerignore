@@ -1,0 +1,16 @@
+.git
+node_modules
+build
+.svelte-kit
+data
+gdpr-data
+.env
+.env.*
+!.env.example
+.e2e
+.superpowers
+test-results
+playwright-report
+.vscode
+.DS_Store
+Thumbs.db

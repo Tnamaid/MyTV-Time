@@ -1,0 +1,18 @@
+# MyTV-Time — see docs/INSTALL.md
+services:
+  app:
+    build: .
+    env_file: .env
+    environment:
+      # These win over .env: the database must live in the ./data volume, or it is lost on rebuild.
+      DB_PATH: /data/tracker.db
+      PORT: "3000"
+      TZ: ${TZ:-Europe/Paris}
+    volumes:
+      - ./data:/data
+      # Your TV Time GDPR exports, read-only, for the one-time importer.
+      - ./gdpr-data:/gdpr-data:ro
+    ports:
+      # Only reachable from this PC; Tailscale (`tailscale serve`) publishes it to your tailnet over HTTPS.
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped

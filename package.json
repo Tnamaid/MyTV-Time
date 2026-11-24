@@ -16,7 +16,8 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "vitest run",
 		"import": "tsx scripts/import-tvtime.ts",
-		"test:e2e": "playwright test"
+		"test:e2e": "playwright test",
+		"backup": "tsx scripts/backup.ts"
 	},
 	"devDependencies": {
 		"@playwright/test": "1.63.0",
