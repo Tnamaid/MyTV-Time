@@ -10,10 +10,10 @@ const mv = (uuid: string, type: MovieRow['type'], at: string, over: Partial<Movi
 	uuid, name: 'Movie', releaseYear: 2000, createdAt: at, type, ...over
 });
 const show = (id: number, over: Partial<ShowStatusRow> = {}): ShowStatusRow => ({
-	tvdbId: id, name: 'Naruto', followed: false, archived: false, forLater: false, createdAt: '2020-01-01T00:00:00Z', ...over
+	tvdbId: id, name: 'Naruto', followed: false, archived: false, forLater: false, createdAt: '2020-01-01T00:00:00Z', nbEpisodesSeen: null, ...over
 });
 const exp = (source: 'tvtime1' | 'tvtime2', p: Partial<ParsedExport> = {}): ParsedExport => ({
-	source, episodes: [], movies: [], shows: [], ...p
+	source, episodes: [], movies: [], shows: [], skippedRowsNoEpisodeId: 0, ...p
 });
 
 describe('mergeExports', () => {
@@ -34,12 +34,31 @@ describe('mergeExports', () => {
 		const a = exp('tvtime1', { shows: [show(1, { followed: true, archived: false })] });
 		const b = exp('tvtime2', { shows: [show(1, { followed: false, archived: true, forLater: true })] });
 		for (const r of [mergeExports(a, b), mergeExports(b, a)]) {
-			expect(r.shows.get(1)).toEqual({ tvdbId: 1, name: 'Naruto', followed: false, archived: true, forLater: true });
+			expect(r.shows.get(1)).toEqual({ tvdbId: 1, name: 'Naruto', followed: false, archived: true, forLater: true, nbEpisodesSeen: null });
 		}
 	});
 	it('adds show seen only in watches with followed=false', () => {
 		const r = mergeExports(exp('tvtime1', { episodes: [ep(10, '2020-01-01T10:00:00Z', { tvdbSeriesId: 77, seriesName: 'Lost' })] }), exp('tvtime2'));
-		expect(r.shows.get(77)).toEqual({ tvdbId: 77, name: 'Lost', followed: false, archived: false, forLater: false });
+		expect(r.shows.get(77)).toEqual({ tvdbId: 77, name: 'Lost', followed: false, archived: false, forLater: false, nbEpisodesSeen: null });
+	});
+	it('show with no name in the show files gets the series_name of its episode rows', () => {
+		const a = exp('tvtime1', { shows: [show(5, { name: '', followed: true })], episodes: [ep(10, '2020-01-01T10:00:00Z', { tvdbSeriesId: 5, seriesName: 'Dark' })] });
+		const r = mergeExports(a, exp('tvtime2'));
+		expect(r.shows.get(5)).toMatchObject({ name: 'Dark', followed: true });
+	});
+	it("tvtime2's empty name does not wipe tvtime1's name", () => {
+		const a = exp('tvtime1', { shows: [show(5, { name: 'Dark' })] });
+		const b = exp('tvtime2', { shows: [show(5, { name: '', archived: true })] });
+		expect(mergeExports(a, b).shows.get(5)).toMatchObject({ name: 'Dark', archived: true });
+	});
+	it('nbEpisodesSeen is the max across both exports; skipped rows carried per export', () => {
+		const a = exp('tvtime1', { shows: [show(1, { nbEpisodesSeen: 12 }), show(2, { nbEpisodesSeen: 3 })], skippedRowsNoEpisodeId: 4 });
+		const b = exp('tvtime2', { shows: [show(1, { nbEpisodesSeen: 9 }), show(2)], skippedRowsNoEpisodeId: 1 });
+		for (const r of [mergeExports(a, b), mergeExports(b, a)]) {
+			expect(r.shows.get(1)!.nbEpisodesSeen).toBe(12);
+			expect(r.shows.get(2)!.nbEpisodesSeen).toBe(3);
+			expect(r.skippedRowsNoEpisodeId).toEqual({ tvtime1: 4, tvtime2: 1 });
+		}
 	});
 	it('movie in both with different dates -> 2 watches; tvtime2 name wins', () => {
 		const a = exp('tvtime1', { movies: [mv('m', 'watch', '2020-01-01T10:00:00Z', { name: 'Old', releaseYear: null })] });

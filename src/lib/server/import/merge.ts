@@ -1,7 +1,15 @@
 import type { EpisodeWatchRow, ParsedExport } from './parse';
 
 type Source = 'tvtime1' | 'tvtime2';
-export type ImportShow = { tvdbId: number; name: string; followed: boolean; archived: boolean; forLater: boolean };
+export type ImportShow = {
+	tvdbId: number;
+	name: string;
+	followed: boolean;
+	archived: boolean;
+	forLater: boolean;
+	/** TV Time's nb_episodes_seen (max across both exports), null/absent when unknown. Sanity check only. */
+	nbEpisodesSeen?: number | null;
+};
 export type ImportEpisodeWatch = EpisodeWatchRow & { source: Source; importKey: string };
 export type ImportMovieWatch = { at: string; source: Source; importKey: string };
 export type ImportMovie = {
@@ -15,6 +23,8 @@ export type ImportBundle = {
 	shows: Map<number, ImportShow>;
 	episodeWatches: ImportEpisodeWatch[];
 	movies: Map<string, ImportMovie>;
+	/** Per export: watch rows dropped by the parser for lack of an ep_id (reported, never imported). */
+	skippedRowsNoEpisodeId?: Record<Source, number>;
 };
 
 const minute = (iso: string) => iso.slice(0, 16);
@@ -32,7 +42,17 @@ export function mergeExports(a: ParsedExport, b: ParsedExport): ImportBundle {
 	const shows = new Map<number, ImportShow>();
 	for (const exp of ordered) {
 		for (const s of exp.shows) {
-			shows.set(s.tvdbId, { tvdbId: s.tvdbId, name: s.name, followed: s.followed, archived: s.archived, forLater: s.forLater });
+			// tvtime2 flags win; but keep a known name and the larger nb_episodes_seen.
+			const prev = shows.get(s.tvdbId);
+			const seen = [prev?.nbEpisodesSeen, s.nbEpisodesSeen].filter((n): n is number => typeof n === 'number');
+			shows.set(s.tvdbId, {
+				tvdbId: s.tvdbId,
+				name: s.name || prev?.name || '',
+				followed: s.followed,
+				archived: s.archived,
+				forLater: s.forLater,
+				nbEpisodesSeen: seen.length ? Math.max(...seen) : null
+			});
 		}
 	}
 
@@ -44,8 +64,13 @@ export function mergeExports(a: ParsedExport, b: ParsedExport): ImportBundle {
 			if (seen.has(importKey)) continue;
 			seen.add(importKey);
 			tagged.push({ ...e, source: exp.source, importKey, at: e.watchedAt });
-			if (!shows.has(e.tvdbSeriesId)) {
-				shows.set(e.tvdbSeriesId, { tvdbId: e.tvdbSeriesId, name: e.seriesName, followed: false, archived: false, forLater: false });
+			const known = shows.get(e.tvdbSeriesId);
+			if (!known) {
+				shows.set(e.tvdbSeriesId, {
+					tvdbId: e.tvdbSeriesId, name: e.seriesName, followed: false, archived: false, forLater: false, nbEpisodesSeen: null
+				});
+			} else if (!known.name && e.seriesName) {
+				known.name = e.seriesName; // show files had no tv_show_name
 			}
 		}
 	}
@@ -80,5 +105,8 @@ export function mergeExports(a: ParsedExport, b: ParsedExport): ImportBundle {
 		m.forLater = toWatch.has(m.uuid) && m.watches.length === 0;
 	}
 
-	return { shows, episodeWatches, movies };
+	const skippedRowsNoEpisodeId = { tvtime1: 0, tvtime2: 0 };
+	for (const exp of ordered) skippedRowsNoEpisodeId[exp.source] += exp.skippedRowsNoEpisodeId;
+
+	return { shows, episodeWatches, movies, skippedRowsNoEpisodeId };
 }
