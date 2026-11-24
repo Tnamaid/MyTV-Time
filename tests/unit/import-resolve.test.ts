@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { openDb, type Db } from '../../src/lib/server/db/client';
 import { episode, importIssue, title, watch, watchlist } from '../../src/lib/server/db/schema';
@@ -443,4 +443,46 @@ test('re-run refreshes meta_json of unresolved issues only', async () => {
 	expect(counts(db)).toEqual(before);
 	expect(meta(db, 'show:200').followed).toBe(true);
 	expect(meta(db, 'show:500').followed).toBe(false);
+});
+
+describe('tvdb fallback sweep is limited to the seasons with misses', () => {
+	const threeSeasons = (episodeTvdb: Record<string, number>) =>
+		fakeTmdb({
+			tvdb: { 900: 9 },
+			shows: {
+				9: show({
+					id: 9, name: 'Wide', external_ids: { tvdb_id: 900 },
+					seasons: [1, 2, 3].map((n) => ({ season_number: n, name: `S${n}`, air_date: null }))
+				})
+			},
+			seasons: Object.fromEntries([1, 2, 3].map((n) => [`9:${n}`, { episodes: [1, 2, 3].map((i) => ep(n, i)) }])),
+			episodeTvdb
+		});
+	const run = async (t: ReturnType<typeof threeSeasons>, w: ImportEpisodeWatch[]) => {
+		const db = openDb(':memory:');
+		const calls: string[] = [];
+		const orig = t.getEpisodeExternalIds;
+		t.getEpisodeExternalIds = async (id, s, e) => (calls.push(`${s}:${e}`), orig(id, s, e));
+		await runImport(db, t, { shows: new Map([sh(900, 'Wide')]), episodeWatches: w, movies: new Map() }, { dryRun: false });
+		return { db, calls };
+	};
+
+	test('a miss in raw season 2 that TMDB has in season 2 -> only season 2 is swept', async () => {
+		n = 0;
+		const { db, calls } = await run(threeSeasons({ '9:2:3': 9205 }), [ew(900, 'Wide', 1, 1, 9101), ew(900, 'Wide', 2, 5, 9205)]);
+		expect(calls.sort()).toEqual(['2:1', '2:2', '2:3']);
+		const w = db.select().from(watch).where(eq(watch.rawTvdbEpisodeId, 9205)).get()!;
+		const e = db.select().from(episode).where(eq(episode.id, w.episodeId!)).get()!;
+		expect([e.seasonNumber, e.episodeNumber]).toEqual([2, 3]);
+	});
+
+	test('no match in the miss seasons -> the remaining seasons are swept once', async () => {
+		n = 0;
+		const { db, calls } = await run(threeSeasons({ '9:1:2': 9105 }), [ew(900, 'Wide', 2, 5, 9105)]);
+		expect(calls.slice(0, 3).sort()).toEqual(['2:1', '2:2', '2:3']);
+		expect(calls.slice(3).sort()).toEqual(['1:1', '1:2', '1:3', '3:1', '3:2', '3:3']);
+		const w = db.select().from(watch).where(eq(watch.rawTvdbEpisodeId, 9105)).get()!;
+		const e = db.select().from(episode).where(eq(episode.id, w.episodeId!)).get()!;
+		expect([e.seasonNumber, e.episodeNumber]).toEqual([1, 2]);
+	});
 });
