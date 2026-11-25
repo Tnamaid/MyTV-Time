@@ -7,6 +7,6 @@ data from [TMDB](https://www.themoviedb.org/)), and import your history from TV 
 It runs on your own PC with Docker and is reached from your phone through Tailscale; your data is a
 single SQLite file.
 
-**Install:** see [docs/INSTALL.md](docs/INSTALL.md). Setting up a dedicated Debian home server from scratch: [docs/SETUP-DEBIAN.md](docs/SETUP-DEBIAN.md).
+**Install:** see [docs/INSTALL.md](docs/INSTALL.md). Setting up a dedicated home server from scratch: [Debian](docs/SETUP-DEBIAN.md) or [Ubuntu Desktop](docs/SETUP-UBUNTU.md).
 
 **Develop:** `npm ci`, then `npm run dev`; tests: `npm test` (unit) and `npm run test:e2e` (Playwright).
