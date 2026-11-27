@@ -2,18 +2,19 @@
 	import { enhance } from '$app/forms';
 	import { epCode } from '#lib/format.ts';
 
-	type Preview = { rawSeason: number; rawEpisode: number; targetSeason: number; targetEpisode: number; targetName: string | null };
+	type Preview = { rawSeason: number | null; rawEpisode: number; targetSeason: number; targetEpisode: number; targetName: string | null };
 
 	let {
 		issueKey,
 		rawSeason,
 		seasons,
+		initialSeason,
 		initial
-	}: { issueKey: string; rawSeason: number; seasons: number[]; initial: Preview[] } = $props();
+	}: { issueKey: string; rawSeason: number | null; seasons: number[]; initialSeason: number; initial: Preview[] } = $props();
 
 	// Local form state, seeded once from the server (the parent keys this component by issue).
 	// svelte-ignore state_referenced_locally
-	let season = $state(String(rawSeason));
+	let season = $state(String(initialSeason));
 	let offset = $state('0');
 	// svelte-ignore state_referenced_locally
 	let preview = $state<Preview[]>(initial);
@@ -92,7 +93,7 @@
 		</div>
 	</div>
 	<p class="hint">
-		Raw S{rawSeason}E<i>n</i> → S{season || '?'}E<i>n</i>{Number(offset) >= 0 ? ' + ' : ' − '}{Math.abs(Number(offset) || 0)}.
+		Raw S{rawSeason ?? '??'}E<i>n</i> → S{season || '?'}E<i>n</i>{Number(offset) >= 0 ? ' + ' : ' − '}{Math.abs(Number(offset) || 0)}.
 		{#if seasons.length}TMDB seasons: {seasons.join(', ')}.{/if}
 	</p>
 	{#if previewError}

@@ -1,4 +1,4 @@
-import type { EpisodeWatchRow, ParsedExport } from './parse';
+import type { EpisodeRowStats, EpisodeWatchRow, ParsedExport } from './parse';
 
 type Source = 'tvtime1' | 'tvtime2';
 export type ImportShow = {
@@ -23,11 +23,21 @@ export type ImportBundle = {
 	shows: Map<number, ImportShow>;
 	episodeWatches: ImportEpisodeWatch[];
 	movies: Map<string, ImportMovie>;
-	/** Per export: watch rows dropped by the parser for lack of an ep_id (reported, never imported). */
-	skippedRowsNoEpisodeId?: Record<Source, number>;
+	/** Per export: incomplete watch rows (see EpisodeRowStats), for the import report. */
+	rowStats?: Record<Source, EpisodeRowStats>;
 };
 
 const minute = (iso: string) => iso.slice(0, 16);
+
+/**
+ * Dedupe key of an episode watch. Rows with an ep_id keep the historic `ep:<ep_id>:<minute>`
+ * form (so re-runs over an earlier import still dedupe); rows without one fall back to the
+ * show and whatever numbers they have.
+ */
+export function episodeImportKey(e: EpisodeWatchRow): string {
+	if (e.tvdbEpisodeId !== null) return `ep:${e.tvdbEpisodeId}:${minute(e.watchedAt)}`;
+	return `ep:s${e.tvdbSeriesId}:${e.season ?? '-'}x${e.episode ?? '-'}:${minute(e.watchedAt)}`;
+}
 const byTimeThenKey = (a: { at: string; importKey: string }, b: { at: string; importKey: string }) =>
 	a.at < b.at ? -1 : a.at > b.at ? 1 : a.importKey < b.importKey ? -1 : a.importKey > b.importKey ? 1 : 0;
 
@@ -60,7 +70,7 @@ export function mergeExports(a: ParsedExport, b: ParsedExport): ImportBundle {
 	const tagged: (ImportEpisodeWatch & { at: string })[] = [];
 	for (const exp of ordered) {
 		for (const e of exp.episodes) {
-			const importKey = `ep:${e.tvdbEpisodeId}:${minute(e.watchedAt)}`;
+			const importKey = episodeImportKey(e);
 			if (seen.has(importKey)) continue;
 			seen.add(importKey);
 			tagged.push({ ...e, source: exp.source, importKey, at: e.watchedAt });
@@ -105,8 +115,14 @@ export function mergeExports(a: ParsedExport, b: ParsedExport): ImportBundle {
 		m.forLater = toWatch.has(m.uuid) && m.watches.length === 0;
 	}
 
-	const skippedRowsNoEpisodeId = { tvtime1: 0, tvtime2: 0 };
-	for (const exp of ordered) skippedRowsNoEpisodeId[exp.source] += exp.skippedRowsNoEpisodeId;
+	const zero = (): EpisodeRowStats => ({ noShowId: 0, noEpisodeId: 0, noNumbers: 0 });
+	const rowStats: Record<Source, EpisodeRowStats> = { tvtime1: zero(), tvtime2: zero() };
+	for (const exp of ordered) {
+		const t = rowStats[exp.source];
+		t.noShowId += exp.rowStats.noShowId;
+		t.noEpisodeId += exp.rowStats.noEpisodeId;
+		t.noNumbers += exp.rowStats.noNumbers;
+	}
 
-	return { shows, episodeWatches, movies, skippedRowsNoEpisodeId };
+	return { shows, episodeWatches, movies, rowStats };
 }

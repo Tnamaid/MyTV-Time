@@ -13,7 +13,7 @@ const show = (id: number, over: Partial<ShowStatusRow> = {}): ShowStatusRow => (
 	tvdbId: id, name: 'Naruto', followed: false, archived: false, forLater: false, createdAt: '2020-01-01T00:00:00Z', nbEpisodesSeen: null, ...over
 });
 const exp = (source: 'tvtime1' | 'tvtime2', p: Partial<ParsedExport> = {}): ParsedExport => ({
-	source, episodes: [], movies: [], shows: [], skippedRowsNoEpisodeId: 0, ...p
+	source, episodes: [], movies: [], shows: [], rowStats: { noShowId: 0, noEpisodeId: 0, noNumbers: 0 }, ...p
 });
 
 describe('mergeExports', () => {
@@ -52,12 +52,15 @@ describe('mergeExports', () => {
 		expect(mergeExports(a, b).shows.get(5)).toMatchObject({ name: 'Dark', archived: true });
 	});
 	it('nbEpisodesSeen is the max across both exports; skipped rows carried per export', () => {
-		const a = exp('tvtime1', { shows: [show(1, { nbEpisodesSeen: 12 }), show(2, { nbEpisodesSeen: 3 })], skippedRowsNoEpisodeId: 4 });
-		const b = exp('tvtime2', { shows: [show(1, { nbEpisodesSeen: 9 }), show(2)], skippedRowsNoEpisodeId: 1 });
+		const a = exp('tvtime1', { shows: [show(1, { nbEpisodesSeen: 12 }), show(2, { nbEpisodesSeen: 3 })], rowStats: { noShowId: 4, noEpisodeId: 2, noNumbers: 7 } });
+		const b = exp('tvtime2', { shows: [show(1, { nbEpisodesSeen: 9 }), show(2)], rowStats: { noShowId: 1, noEpisodeId: 0, noNumbers: 3 } });
 		for (const r of [mergeExports(a, b), mergeExports(b, a)]) {
 			expect(r.shows.get(1)!.nbEpisodesSeen).toBe(12);
 			expect(r.shows.get(2)!.nbEpisodesSeen).toBe(3);
-			expect(r.skippedRowsNoEpisodeId).toEqual({ tvtime1: 4, tvtime2: 1 });
+			expect(r.rowStats).toEqual({
+				tvtime1: { noShowId: 4, noEpisodeId: 2, noNumbers: 7 },
+				tvtime2: { noShowId: 1, noEpisodeId: 0, noNumbers: 3 }
+			});
 		}
 	});
 	it('movie in both with different dates -> 2 watches; tvtime2 name wins', () => {

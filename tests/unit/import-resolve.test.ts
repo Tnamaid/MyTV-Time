@@ -122,7 +122,7 @@ test('report counts on a fresh import', async () => {
 		watchlist: 2, // Gamma (show for_later) + Later (movie for_later)
 		skippedExisting: 0,
 		sanity: {
-			skippedRowsNoEpisodeId: { tvtime1: 0, tvtime2: 0 },
+			rowStats: { tvtime1: { noShowId: 0, noEpisodeId: 0, noNumbers: 0 }, tvtime2: { noShowId: 0, noEpisodeId: 0, noNumbers: 0 } },
 			expectedEpisodesSeen: null, // no show has nb_episodes_seen
 			importedDistinctEpisodes: 0,
 			showsBelowExpected: [],
@@ -141,10 +141,10 @@ test('sanity: skipped rows, nb_episodes_seen vs distinct imported episodes, shor
 	set(300, 0); // Gamma: 0 / 0
 	// a rewatch of Alpha S1E1 counts once
 	bundle.episodeWatches.push({ ...bundle.episodeWatches[0], watchedAt: '2022-01-01T00:00:00Z', importKey: 'ep:8001:2022-01-01T00:00', isRewatch: true });
-	bundle.skippedRowsNoEpisodeId = { tvtime1: 2, tvtime2: 1 };
+	bundle.rowStats = { tvtime1: { noShowId: 2, noEpisodeId: 0, noNumbers: 4 }, tvtime2: { noShowId: 1, noEpisodeId: 0, noNumbers: 0 } };
 	const r = await runImport(db, makeTmdb(), bundle, { dryRun: false });
 	expect(r.sanity).toEqual({
-		skippedRowsNoEpisodeId: { tvtime1: 2, tvtime2: 1 },
+		rowStats: { tvtime1: { noShowId: 2, noEpisodeId: 0, noNumbers: 4 }, tvtime2: { noShowId: 1, noEpisodeId: 0, noNumbers: 0 } },
 		expectedEpisodesSeen: 10,
 		importedDistinctEpisodes: 6, // over the 4 shows that have nb_episodes_seen
 		showsBelowExpected: [
@@ -154,7 +154,8 @@ test('sanity: skipped rows, nb_episodes_seen vs distinct imported episodes, shor
 		showsBelowExpectedTotal: 2
 	});
 	const text = formatSanity(r).join('\n');
-	expect(text).toContain('export 1: 2, export 2: 1');
+	expect(text).toMatch(/without a show id.*export 1: 2, export 2: 1/);
+	expect(text).toMatch(/without a season or episode number.*export 1: 4, export 2: 0/);
 	expect(text).toMatch(/nb_episodes_seen.*10/);
 	expect(text).toMatch(/imported.*6/);
 	expect(text).toContain('Delta (tvdb 400): 2 imported, TV Time says 5');

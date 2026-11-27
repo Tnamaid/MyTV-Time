@@ -9,7 +9,7 @@ const e2 = parseExport('tests/fixtures/tvtime/export2', 'tvtime2');
 
 test('export1 episodes: counts, padded headers, rewatch flag, ISO dates', () => {
 	expect(e1.source).toBe('tvtime1');
-	expect(e1.episodes).toHaveLength(5);
+	expect(e1.episodes).toHaveLength(6); // incl. watch-999999, which has no ep_id
 	expect(e1.episodes[0]).toEqual({
 		tvdbSeriesId: 78857,
 		tvdbEpisodeId: 136001,
@@ -40,9 +40,9 @@ test('export2 episodes: different column order', () => {
 	expect(e2.episodes.some((e) => e.isRewatch)).toBe(false);
 });
 
-test('ignores non watch/rewatch keys and rows without ep_id', () => {
-	expect(e1.episodes.map((e) => e.tvdbEpisodeId)).not.toContain(999999);
-	expect(e1.episodes.every((e) => Number.isInteger(e.tvdbEpisodeId))).toBe(true);
+test('ignores non watch/rewatch keys; keeps a row without ep_id with its numbers', () => {
+	expect(e1.episodes.some((e) => e.tvdbSeriesId === 78857 && e.watchedAt.startsWith('2020-02-28'))).toBe(false); // follow-
+	expect(e1.episodes.find((e) => e.tvdbEpisodeId === null)).toMatchObject({ tvdbSeriesId: 81189, season: 1, episode: 3 });
 });
 
 test('Naruto appears in both exports', () => {
@@ -106,7 +106,7 @@ function tmpExport(files: Record<string, string>): string {
 
 test('export folder with only the episode file yields an empty export', () => {
 	const dir = tmpExport({});
-	expect(parseExport(dir, 'tvtime2')).toEqual({ source: 'tvtime2', episodes: [], movies: [], shows: [], skippedRowsNoEpisodeId: 0 });
+	expect(parseExport(dir, 'tvtime2')).toEqual({ source: 'tvtime2', episodes: [], movies: [], shows: [], rowStats: { noShowId: 0, noEpisodeId: 0, noNumbers: 0 } });
 });
 
 test('missing tracking-prod-records-v2.csv throws a clear error (wrong --dir)', () => {
@@ -158,9 +158,9 @@ test('nb_episodes_seen is read from user_tv_show_data.csv (fixtures)', () => {
 	expect(by[81189].nbEpisodesSeen).toBeNull(); // only in followed_tv_show.csv
 });
 
-test('watch/rewatch rows without ep_id are counted, not silently dropped', () => {
-	expect(e1.skippedRowsNoEpisodeId).toBe(1); // watch-999999; the follow- row is not a watch
-	expect(e2.skippedRowsNoEpisodeId).toBe(0);
+test('watch/rewatch rows without ep_id are counted and kept', () => {
+	expect(e1.rowStats).toEqual({ noShowId: 0, noEpisodeId: 1, noNumbers: 0 }); // watch-999999; follow- is not a watch
+	expect(e2.rowStats).toEqual({ noShowId: 0, noEpisodeId: 0, noNumbers: 0 });
 });
 
 test('short row (missing a required field) -> error naming file and line', () => {

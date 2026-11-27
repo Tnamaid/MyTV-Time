@@ -4,9 +4,12 @@ import { parse } from 'csv-parse/sync';
 
 export type EpisodeWatchRow = {
 	tvdbSeriesId: number;
-	tvdbEpisodeId: number;
-	season: number;
-	episode: number;
+	/** null when the export's ep_id is empty: the watch is then linked by (season, episode) only. */
+	tvdbEpisodeId: number | null;
+	/** null when s_no is empty (seen in real exports): the watch is then linked by tvdbEpisodeId only. */
+	season: number | null;
+	/** null when ep_no is empty. */
+	episode: number | null;
 	seriesName: string;
 	watchedAt: string;
 	isRewatch: boolean;
@@ -35,8 +38,16 @@ export type ParsedExport = {
 	episodes: EpisodeWatchRow[];
 	movies: MovieRow[];
 	shows: ShowStatusRow[];
-	/** watch-/rewatch- rows in tracking-prod-records-v2.csv with an empty ep_id (cannot be imported). */
-	skippedRowsNoEpisodeId: number;
+	rowStats: EpisodeRowStats;
+};
+/** Counts of incomplete watch-/rewatch- rows in tracking-prod-records-v2.csv, for the import report. */
+export type EpisodeRowStats = {
+	/** Empty s_id: no show to attach the watch to, so the row is skipped (the only rows dropped). */
+	noShowId: number;
+	/** Empty ep_id: imported, linked by s_no/ep_no only. */
+	noEpisodeId: number;
+	/** Empty s_no or ep_no: imported, linked by ep_id only (or left for Fix imports). */
+	noNumbers: number;
 };
 
 type Rec = Record<string, string | undefined>;
@@ -120,30 +131,44 @@ function int(file: string, line: number, col: string, v: string | undefined): nu
 	return Number(s);
 }
 
-function parseEpisodes(dir: string): { episodes: EpisodeWatchRow[]; skipped: number } {
+/** Like int(), but an empty field is null (TV Time leaves s_no/ep_no/ep_id empty on some rows). */
+function optInt(file: string, line: number, col: string, v: string | undefined): number | null {
+	return v ? int(file, line, col, v) : null;
+}
+
+/**
+ * Every watch-/rewatch- row that names a show (s_id) is kept, even with an empty ep_id,
+ * s_no or ep_no: linking uses whichever identity is there, and what cannot be linked ends
+ * up in Fix imports with its raw fields, so no history is lost. A non-empty field that is
+ * not an integer still throws (it usually means the columns are shifted).
+ */
+function parseEpisodes(dir: string): { episodes: EpisodeWatchRow[]; stats: EpisodeRowStats } {
 	const f = 'tracking-prod-records-v2.csv';
 	const rows = readCsv(dir, f, ['key', 's_id', 'ep_id', 's_no', 'ep_no', 'series_name', 'created_at'], true);
 	const episodes: EpisodeWatchRow[] = [];
-	let skipped = 0;
+	const stats: EpisodeRowStats = { noShowId: 0, noEpisodeId: 0, noNumbers: 0 };
 	for (const { r, line } of rows) {
 		const key = r.key!;
 		const isRewatch = key.startsWith('rewatch-');
 		if (!isRewatch && !key.startsWith('watch-')) continue;
-		if (!r.ep_id) {
-			skipped++; // reported in the import's sanity section
+		if (!r.s_id) {
+			stats.noShowId++; // reported in the import's sanity section
 			continue;
 		}
-		episodes.push({
+		const row: EpisodeWatchRow = {
 			tvdbSeriesId: int(f, line, 's_id', r.s_id),
-			tvdbEpisodeId: int(f, line, 'ep_id', r.ep_id),
-			season: int(f, line, 's_no', r.s_no),
-			episode: int(f, line, 'ep_no', r.ep_no),
+			tvdbEpisodeId: optInt(f, line, 'ep_id', r.ep_id),
+			season: optInt(f, line, 's_no', r.s_no),
+			episode: optInt(f, line, 'ep_no', r.ep_no),
 			seriesName: r.series_name!,
 			watchedAt: toIso(r.created_at!, f),
 			isRewatch
-		});
+		};
+		if (row.tvdbEpisodeId === null) stats.noEpisodeId++;
+		if (row.season === null || row.episode === null) stats.noNumbers++;
+		episodes.push(row);
 	}
-	return { episodes, skipped };
+	return { episodes, stats };
 }
 
 function parseMovies(dir: string): MovieRow[] {
@@ -210,6 +235,6 @@ function parseShows(dir: string): ShowStatusRow[] {
 
 /** Parse one TV Time GDPR export folder. tracking-prod-records-v2.csv is required; the other files are optional. */
 export function parseExport(dir: string, source: 'tvtime1' | 'tvtime2'): ParsedExport {
-	const { episodes, skipped } = parseEpisodes(dir);
-	return { source, episodes, movies: parseMovies(dir), shows: parseShows(dir), skippedRowsNoEpisodeId: skipped };
+	const { episodes, stats } = parseEpisodes(dir);
+	return { source, episodes, movies: parseMovies(dir), shows: parseShows(dir), rowStats: stats };
 }

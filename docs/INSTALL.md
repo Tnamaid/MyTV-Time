@@ -235,7 +235,9 @@ before you trust it:
 
 ```
 Sanity check against TV Time:
-  Watch rows without an episode id (cannot be imported): export 1: 0, export 2: 3
+  Watch rows without a season or episode number (imported, linked by episode id): export 1: 412, export 2: 0
+  Watch rows without an episode id (imported, linked by season/episode number): export 1: 0, export 2: 3
+  Watch rows without a show id (cannot be imported): export 1: 0, export 2: 0
   Episodes seen according to TV Time (nb_episodes_seen): 8,912
   Distinct episodes imported for those shows:            8,905
   Shows with fewer imported episodes than TV Time counted: 2
@@ -243,9 +245,14 @@ Sanity check against TV Time:
     …
 ```
 
-- **Watch rows without an episode id** — rows of TV Time's watch file that name no episode, per
-  export. They can't be imported. A few is normal; hundreds means the export is not what the
-  importer expects — report it.
+- **Watch rows without a season or episode number** — TV Time leaves `s_no` (sometimes `ep_no`)
+  empty on some rows. They are imported and linked by their TVDB episode id; the ones that can't be
+  linked are kept and listed in **Fix imports** under "no season number".
+- **Watch rows without an episode id** — rows with an empty `ep_id`. They are imported and linked by
+  season and episode number; leftovers go to **Fix imports** like any other episode.
+- **Watch rows without a show id** — the only rows that can't be imported, since there is no show
+  to attach them to. A few is normal; hundreds means the export is not what the importer expects —
+  report it.
 - **Episodes seen according to TV Time** — the sum of each show's `nb_episodes_seen` (from
   `user_tv_show_data.csv`; the larger of the two exports per show). If your export has no such
   column, the line says the totals can't be cross-checked.
