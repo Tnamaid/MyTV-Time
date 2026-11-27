@@ -61,20 +61,18 @@ export async function fixShow(db: Db, tmdb: ImportTmdb, issueKey: string, tmdbId
 	const pending = () =>
 		db.select().from(watch).where(and(eq(watch.rawTvdbSeriesId, meta.tvdbId), isNull(watch.titleId))).all();
 	const ws = pending();
-	const linkable = ws.map((w) => ({
-		w, tvdbEpisodeId: w.rawTvdbEpisodeId ?? -1, season: w.rawSeason ?? -1, episode: w.rawEpisode ?? -1
-	}));
+	const linkable = ws.map((w) => ({ w, tvdbEpisodeId: w.rawTvdbEpisodeId, season: w.rawSeason, episode: w.rawEpisode }));
 	const resolved = await resolveEpisodes(db, tmdb, titleId, linkable);
 
 	db.transaction(() => {
 		if (meta.archived) setArchived(db, titleId, true);
 		if (meta.forLater) addToWatchlist(db, titleId);
 
-		const unmatched = new Map<number, number>();
+		const unmatched = new Map<number | null, number>(); // null: no season number
 		for (const l of linkable) {
 			const episodeId = resolved.ids.get(l) ?? null;
 			db.update(watch).set({ titleId, episodeId }).where(eq(watch.id, l.w.id)).run();
-			if (episodeId === null && l.w.rawSeason !== null) unmatched.set(l.w.rawSeason, (unmatched.get(l.w.rawSeason) ?? 0) + 1);
+			if (episodeId === null) unmatched.set(l.w.rawSeason, (unmatched.get(l.w.rawSeason) ?? 0) + 1);
 		}
 		for (const [season, count] of unmatched) {
 			db.insert(importIssue)
@@ -92,19 +90,23 @@ export async function fixShow(db: Db, tmdb: ImportTmdb, issueKey: string, tmdbId
 	});
 }
 
+/** Filter on watch.raw_season; null is the "no season number" (empty s_no) group. */
+const rawSeasonIs = (rawSeason: number | null) =>
+	rawSeason === null ? isNull(watch.rawSeason) : eq(watch.rawSeason, rawSeason);
+
 /** Raw-episode -> target-episode lookup for a title's unlinked watches in one raw season. */
-function unlinkedRaw(db: Db, titleId: number, rawSeason: number) {
+function unlinkedRaw(db: Db, titleId: number, rawSeason: number | null) {
 	return db
 		.select()
 		.from(watch)
-		.where(and(eq(watch.titleId, titleId), eq(watch.rawSeason, rawSeason), isNull(watch.episodeId)))
+		.where(and(eq(watch.titleId, titleId), rawSeasonIs(rawSeason), isNull(watch.episodeId)))
 		.all();
 }
 
 export function fixEpisodes(
 	db: Db,
 	titleId: number,
-	rawSeason: number,
+	rawSeason: number | null,
 	map: EpisodeMap
 ): { linked: number; unlinked: number } {
 	return db.transaction(() => {
@@ -131,7 +133,7 @@ export function fixEpisodes(
 			const raw = db
 				.select({ id: watch.rawTvdbSeriesId })
 				.from(watch)
-				.where(and(eq(watch.titleId, titleId), eq(watch.rawSeason, rawSeason), isNotNull(watch.rawTvdbSeriesId)))
+				.where(and(eq(watch.titleId, titleId), rawSeasonIs(rawSeason), isNotNull(watch.rawTvdbSeriesId)))
 				.get();
 			const t = db.select({ tvdbId: title.tvdbId }).from(title).where(eq(title.id, titleId)).get();
 			const tvdbId = raw?.id ?? t?.tvdbId ?? null;
@@ -142,7 +144,7 @@ export function fixEpisodes(
 }
 
 export type EpisodePreview = {
-	rawSeason: number;
+	rawSeason: number | null;
 	rawEpisode: number;
 	targetSeason: number;
 	targetEpisode: number;
@@ -153,7 +155,7 @@ export type EpisodePreview = {
 export function previewEpisodeMapping(
 	db: Db,
 	titleId: number,
-	rawSeason: number,
+	rawSeason: number | null,
 	map: EpisodeMap,
 	limit = 3
 ): EpisodePreview[] {
@@ -204,7 +206,7 @@ export async function fixMovie(db: Db, tmdb: ImportTmdb, issueKey: string, tmdbI
 	});
 }
 
-type EpisodeMeta = { tvdbId: number; rawSeason: number };
+type EpisodeMeta = { tvdbId: number; rawSeason: number | null };
 
 /**
  * The library title an open episode issue belongs to, for fixEpisodes/previewEpisodeMapping.
@@ -215,7 +217,7 @@ type EpisodeMeta = { tvdbId: number; rawSeason: number };
 export function episodeIssueTarget(
 	db: Db,
 	issueKey: string
-): { titleId: number; rawSeason: number; tvdbId: number } | null {
+): { titleId: number; rawSeason: number | null; tvdbId: number } | null {
 	const row = db.select().from(importIssue).where(eq(importIssue.key, issueKey)).get();
 	if (!row || row.kind !== 'episode' || row.resolved) return null;
 	const meta = parse<EpisodeMeta>(row.metaJson);
@@ -226,7 +228,7 @@ export function episodeIssueTarget(
 		.where(
 			and(
 				eq(watch.rawTvdbSeriesId, meta.tvdbId),
-				eq(watch.rawSeason, meta.rawSeason),
+				rawSeasonIs(meta.rawSeason ?? null),
 				isNotNull(watch.titleId),
 				isNull(watch.episodeId)
 			)
@@ -239,7 +241,7 @@ export function episodeIssueTarget(
 			.from(title)
 			.where(and(eq(title.kind, 'series'), eq(title.tvdbId, meta.tvdbId)))
 			.get()?.id;
-	return titleId == null ? null : { titleId, rawSeason: meta.rawSeason, tvdbId: meta.tvdbId };
+	return titleId == null ? null : { titleId, rawSeason: meta.rawSeason ?? null, tvdbId: meta.tvdbId };
 }
 
 export function dismissIssue(db: Db, issueKey: string): void {

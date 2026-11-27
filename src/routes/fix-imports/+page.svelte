@@ -118,6 +118,7 @@
 										issueKey={issue.key}
 										rawSeason={issue.rawSeason}
 										seasons={issue.target.seasons}
+										initialSeason={issue.target.initialSeason}
 										initial={issue.target.preview}
 									/>
 								{:else}

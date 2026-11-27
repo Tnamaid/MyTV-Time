@@ -5,8 +5,8 @@ import { TmdbError, type TmdbClient } from '../tmdb/client';
 
 export type LinkTmdb = Pick<TmdbClient, 'getEpisodeExternalIds'>;
 
-/** The raw TV Time identity of an episode watch, all that linking needs. */
-export type RawEpisode = { tvdbEpisodeId: number; season: number; episode: number };
+/** The raw TV Time identity of an episode watch, all that linking needs. Any part may be missing. */
+export type RawEpisode = { tvdbEpisodeId: number | null; season: number | null; episode: number | null };
 
 /** TmdbError statuses that abort an import run instead of becoming an issue. */
 const FATAL_STATUSES = new Set([
@@ -25,8 +25,9 @@ export function recoverable(e: unknown): string {
 	throw e;
 }
 
-export function episodeIssueLabel(showName: string, tvdbId: number, season: number, count: number, error: string | null = null): string {
-	const text = `${showName || `tvdb ${tvdbId}`} S${season} — ${count} unmatched episode${count === 1 ? '' : 's'}`;
+export function episodeIssueLabel(showName: string, tvdbId: number, season: number | null, count: number, error: string | null = null): string {
+	const where = season === null ? 'no season number' : `S${season}`;
+	const text = `${showName || `tvdb ${tvdbId}`} ${where} — ${count} unmatched episode${count === 1 ? '' : 's'}`;
 	return error ? `${text} (TMDB error: ${error})` : text;
 }
 
@@ -45,6 +46,12 @@ export function episodeIssueLabel(showName: string, tvdbId: number, season: numb
  * Fix imports instead of sweeping a whole long-running show for one miss.
  * Episodes that already have a tvdb_id are never re-fetched. A failing lookup
  * stops the fallback; the error ends up in the episode issue label.
+ *
+ * Incomplete rows: a watch with no season number (empty s_no) can only be
+ * found by its tvdb id, so if any is still unlinked after step 1 the
+ * remaining seasons are swept even when step 1 linked others. A watch with
+ * no tvdb id (empty ep_id) can only match by (season, episode) and never
+ * triggers a sweep.
  */
 export async function resolveEpisodes<T extends RawEpisode>(
 	db: Db,
@@ -58,8 +65,11 @@ export async function resolveEpisodes<T extends RawEpisode>(
 	const knownTvdb = new Map(eps.filter((e) => e.tvdbId !== null).map((e) => [e.tvdbId!, e.id]));
 	const misses: T[] = [];
 	for (const w of ws) {
-		const id = knownTvdb.get(w.tvdbEpisodeId) ?? bySe.get(`${w.season}:${w.episode}`);
+		const id =
+			(w.tvdbEpisodeId === null ? undefined : knownTvdb.get(w.tvdbEpisodeId)) ??
+			(w.season === null || w.episode === null ? undefined : bySe.get(`${w.season}:${w.episode}`));
 		if (id !== undefined) out.set(w, id);
+		else if (w.tvdbEpisodeId === null) out.set(w, null); // nothing a tvdb sweep could find
 		else misses.push(w);
 	}
 	if (!misses.length) return { ids: out, error: null };
@@ -76,7 +86,7 @@ export async function resolveEpisodes<T extends RawEpisode>(
 		const byTvdb = new Map(eps.filter((e) => e.tvdbId !== null).map((e) => [e.tvdbId!, e.id]));
 		let linked = 0;
 		for (const w of misses) {
-			const id = byTvdb.get(w.tvdbEpisodeId) ?? null;
+			const id = byTvdb.get(w.tvdbEpisodeId!) ?? null;
 			if (id !== null) linked++;
 			out.set(w, id);
 		}
@@ -85,17 +95,22 @@ export async function resolveEpisodes<T extends RawEpisode>(
 
 	let error: string | null = null;
 	try {
-		const missSeasons = new Set(misses.map((w) => w.season));
-		if ((await sweep((n) => missSeasons.has(n))) === 0) await sweep((n) => !missSeasons.has(n));
+		const missSeasons = new Set(misses.flatMap((w) => (w.season === null ? [] : [w.season])));
+		const linked = missSeasons.size ? await sweep((n) => missSeasons.has(n)) : 0;
+		const seasonlessLeft = misses.some((w) => w.season === null && (out.get(w) ?? null) === null);
+		if (linked === 0 || seasonlessLeft) await sweep((n) => !missSeasons.has(n));
 	} catch (err) {
 		error = recoverable(err);
 		// Keep whatever the lookups so far linked.
 		const byTvdb = new Map(eps.filter((e) => e.tvdbId !== null).map((e) => [e.tvdbId!, e.id]));
-		for (const w of misses) out.set(w, byTvdb.get(w.tvdbEpisodeId) ?? null);
+		for (const w of misses) out.set(w, byTvdb.get(w.tvdbEpisodeId!) ?? null);
 	}
 	return { ids: out, error };
 }
 
-/** Key and meta of an `episode` import issue; one definition for importer and fixer. */
-export const episodeIssueKey = (tvdbId: number, season: number) => `episode:${tvdbId}:${season}`;
-export const episodeIssueMeta = (tvdbId: number, season: number) => ({ tvdbId, rawSeason: season });
+/**
+ * Key and meta of an `episode` import issue; one definition for importer and fixer.
+ * Watches with no season number (empty s_no) share one issue per show, `episode:<tvdb>:none`.
+ */
+export const episodeIssueKey = (tvdbId: number, season: number | null) => `episode:${tvdbId}:${season ?? 'none'}`;
+export const episodeIssueMeta = (tvdbId: number, season: number | null) => ({ tvdbId, rawSeason: season });

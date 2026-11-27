@@ -2,9 +2,9 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** 'S02E05' */
-export function epCode(season: number, episode: number): string {
-	return `S${pad(season)}E${pad(episode)}`;
+/** 'S02E05'; an unknown number (raw TV Time rows with an empty s_no/ep_no) shows as '??'. */
+export function epCode(season: number | null, episode: number | null): string {
+	return `S${season === null ? '??' : pad(season)}E${episode === null ? '??' : pad(episode)}`;
 }
 
 /**

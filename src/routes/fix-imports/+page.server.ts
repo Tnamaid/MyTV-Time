@@ -69,7 +69,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 			.filter((i) => i.kind === 'episode')
 			.map((i) => {
 				const target = episodeIssueTarget(db, i.key);
-				const rawSeason = typeof i.meta?.rawSeason === 'number' ? i.meta.rawSeason : 0;
+				const rawSeason = typeof i.meta?.rawSeason === 'number' ? i.meta.rawSeason : null; // null: no s_no
 				if (!target) return { key: i.key, label: i.label, rawSeason, target: null };
 				const t = db.select({ name: title.name }).from(title).where(eq(title.id, target.titleId)).get();
 				const seasons = db
@@ -79,7 +79,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 					.orderBy(asc(episode.seasonNumber))
 					.all()
 					.map((r) => r.n);
-				const map = { targetSeason: target.rawSeason, offset: 0 };
+				// Watches with no season number start on the first regular season.
+				const map = { targetSeason: target.rawSeason ?? seasons.find((n) => n > 0) ?? 1, offset: 0 };
 				return {
 					key: i.key,
 					label: i.label,
@@ -88,6 +89,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 						titleId: target.titleId,
 						name: t?.name ?? '',
 						seasons,
+						initialSeason: map.targetSeason,
 						preview: previewEpisodeMapping(db, target.titleId, target.rawSeason, map)
 					}
 				};

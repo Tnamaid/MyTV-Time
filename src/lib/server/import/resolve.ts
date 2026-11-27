@@ -5,6 +5,7 @@ import type { TmdbClient } from '../tmdb/client';
 import { addMovie, addSeries, addToWatchlist, setArchived, setFollowed } from '../titles/service';
 import type { TmdbLike } from '../titles/sync';
 import type { ImportBundle, ImportEpisodeWatch, ImportMovie, ImportShow } from './merge';
+import type { EpisodeRowStats } from './parse';
 import { episodeIssueKey, episodeIssueLabel, episodeIssueMeta, recoverable, resolveEpisodes } from './link';
 import { pickMovie, type MovieCandidate } from './movieMatch';
 
@@ -28,8 +29,8 @@ export type ImportReport = {
 };
 
 export type ImportSanity = {
-	/** Per export: watch-/rewatch- rows with no ep_id, which cannot be imported. */
-	skippedRowsNoEpisodeId: { tvtime1: number; tvtime2: number };
+	/** Per export: incomplete watch-/rewatch- rows (only noShowId ones are skipped). */
+	rowStats: { tvtime1: EpisodeRowStats; tvtime2: EpisodeRowStats };
 	/** Sum of nb_episodes_seen over the shows that have one (max of the two exports); null if none has. */
 	expectedEpisodesSeen: number | null;
 	/** Distinct episodes (raw tvdb episode ids) in this import, over those same shows. */
@@ -47,15 +48,20 @@ function sanityOf(bundle: ImportBundle, shows: Map<number, ImportShow>, bySeries
 	const below: ImportSanity['showsBelowExpected'] = [];
 	for (const s of shows.values()) {
 		if (s.nbEpisodesSeen === null || s.nbEpisodesSeen === undefined) continue;
-		const distinct = new Set((bySeries.get(s.tvdbId) ?? []).map((w) => w.tvdbEpisodeId)).size;
+		// A watch with no ep_id counts by its numbers; one with neither cannot be told apart.
+		const ids = (bySeries.get(s.tvdbId) ?? []).flatMap((w) =>
+			w.tvdbEpisodeId !== null ? [`id:${w.tvdbEpisodeId}`] : w.season !== null && w.episode !== null ? [`se:${w.season}x${w.episode}`] : []
+		);
+		const distinct = new Set(ids).size;
 		expected = (expected ?? 0) + s.nbEpisodesSeen;
 		imported += distinct;
 		if (distinct < s.nbEpisodesSeen)
 			below.push({ name: s.name || 'Unknown show', tvdbId: s.tvdbId, imported: distinct, expected: s.nbEpisodesSeen });
 	}
 	below.sort((a, b) => b.expected - b.imported - (a.expected - a.imported) || a.tvdbId - b.tvdbId);
+	const zero = (): EpisodeRowStats => ({ noShowId: 0, noEpisodeId: 0, noNumbers: 0 });
 	return {
-		skippedRowsNoEpisodeId: { tvtime1: 0, tvtime2: 0, ...bundle.skippedRowsNoEpisodeId },
+		rowStats: { tvtime1: zero(), tvtime2: zero(), ...bundle.rowStats },
 		expectedEpisodesSeen: expected,
 		importedDistinctEpisodes: imported,
 		showsBelowExpected: below.slice(0, SANITY_LIST_MAX),
@@ -66,9 +72,12 @@ function sanityOf(bundle: ImportBundle, shows: Map<number, ImportShow>, bySeries
 /** The sanity section as text lines, printed by the CLI after the report table. */
 export function formatSanity({ sanity: s }: ImportReport): string[] {
 	const n = (x: number) => x.toLocaleString('en-US');
+	const per = (k: keyof EpisodeRowStats) => `export 1: ${n(s.rowStats.tvtime1[k])}, export 2: ${n(s.rowStats.tvtime2[k])}`;
 	const lines = [
 		'Sanity check against TV Time:',
-		`  Watch rows without an episode id (cannot be imported): export 1: ${n(s.skippedRowsNoEpisodeId.tvtime1)}, export 2: ${n(s.skippedRowsNoEpisodeId.tvtime2)}`
+		`  Watch rows without a season or episode number (imported, linked by episode id): ${per('noNumbers')}`,
+		`  Watch rows without an episode id (imported, linked by season/episode number): ${per('noEpisodeId')}`,
+		`  Watch rows without a show id (cannot be imported): ${per('noShowId')}`
 	];
 	if (s.expectedEpisodesSeen === null) {
 		lines.push('  No nb_episodes_seen in user_tv_show_data.csv: episode totals cannot be cross-checked.');
@@ -222,7 +231,7 @@ async function importShow(db: Db, tmdb: ImportTmdb, s: ImportShow, ws: ImportEpi
 			}
 		}
 
-		const unmatchedBySeason = new Map<number, number>();
+		const unmatchedBySeason = new Map<number | null, number>(); // null: no season number
 		for (const w of ws) {
 			const episodeId = resolved.ids.get(w) ?? null;
 			if (episodeId === null) {
