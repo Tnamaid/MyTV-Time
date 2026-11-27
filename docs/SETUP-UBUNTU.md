@@ -64,7 +64,14 @@ A desktop PC goes to sleep by default. A server must not.
 sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 ```
 
-3. **Security updates** are installed automatically by Ubuntu (*unattended-upgrades*). Nothing to do. Check once that it's on: **Software & Updates → Updates →** *Automatically check for updates: Daily*, *When there are security updates: Download and install automatically*.
+3. **Security updates** are installed automatically by Ubuntu (*unattended-upgrades*). Ubuntu 26.04 no longer has the *Software & Updates* window, so check once in the Terminal. This should show both lines ending in `"1"`:
+
+   ```bash
+   cat /etc/apt/apt.conf.d/20auto-upgrades
+   systemctl is-enabled unattended-upgrades
+   ```
+
+   The second command should print `enabled`. If the file is missing, a line shows `"0"`, or it prints `disabled`, run `sudo dpkg-reconfigure -plow unattended-upgrades`, answer **Yes**, and check again.
 4. **After a power cut** the PC should turn itself back on. This is a BIOS setting: restart, press **F2** or **Del**, and look under *Power* for **Restore on AC Power Loss** (or *AC Recovery*, *After Power Failure*). Set it to **Power On**. Not every old PC has it.
 
 You don't need to stay logged in. Docker and Tailscale run as system services and start at boot, before anyone logs in.
