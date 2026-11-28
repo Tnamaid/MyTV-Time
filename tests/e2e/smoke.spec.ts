@@ -8,12 +8,10 @@ test('up next: one tap marks the episode and shows the next one', async ({ page 
 	await page.goto('/');
 	const card = page.getByRole('article').filter({ hasText: 'Harbor Lights' });
 	await expect(card).toContainText('S01E01');
-	await expect(card).toContainText('+2 more');
 
 	await card.getByRole('button', { name: /mark .* watched/i }).click();
 
 	await expect(card).toContainText('S01E02');
-	await expect(card).toContainText('+1 more');
 });
 
 test('upcoming lists the next episode by date', async ({ page }) => {

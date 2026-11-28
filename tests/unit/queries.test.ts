@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { openDb } from '../../src/lib/server/db/client';
-import { episode, title, watch } from '../../src/lib/server/db/schema';
+import { episode, title, watch, watchlist } from '../../src/lib/server/db/schema';
 import { getUpNext } from '../../src/lib/server/queries/upNext';
 import { getUpcoming } from '../../src/lib/server/queries/upcoming';
 import { searchLibrary } from '../../src/lib/server/queries/library';
@@ -153,4 +153,14 @@ test('searchLibrary: filters, counts and sorts', () => {
 	expect(searchLibrary(db, { archived: true }).map((i) => i.name)).toEqual(['Gamma']);
 	expect(searchLibrary(db, { sort: 'lastWatched' }).map((i) => i.name)).toEqual(['alpha', 'Beta', 'Gamma']);
 	expect(searchLibrary(db, { sort: 'stars' }).map((i) => i.name)).toEqual(['Beta', 'alpha', 'Gamma']);
+});
+
+test('watchlist series ("to watch later") stay out of Up next until watched', () => {
+	const db = openDb(':memory:');
+	const t = addTitle(db);
+	addEps(db, t.id, aired(1, 3));
+	db.insert(watchlist).values({ titleId: t.id, addedAt: '2026-01-01T00:00:00.000Z' }).run();
+	expect(getUpNext(db, TODAY)).toEqual([]);
+	db.delete(watchlist).run();
+	expect(getUpNext(db, TODAY).map((i) => i.episode)).toEqual([1]);
 });

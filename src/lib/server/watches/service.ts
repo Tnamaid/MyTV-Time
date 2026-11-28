@@ -1,9 +1,15 @@
 import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from 'drizzle-orm';
 import type { Db } from '../db/client';
-import { episode, watch } from '../db/schema';
+import { episode, watch, watchlist } from '../db/schema';
 import { today } from '../time';
 
 type Ep = typeof episode.$inferSelect;
+
+/** The watchlist is "to watch later": once something of a title is watched, it leaves the list. */
+function leaveWatchlist(db: Db, titleIds: Iterable<number>) {
+	const ids = [...new Set(titleIds)];
+	if (ids.length) db.delete(watchlist).where(inArray(watchlist.titleId, ids)).run();
+}
 
 function addWatches(db: Db, eps: Pick<Ep, 'id' | 'titleId'>[], at: Date) {
 	const watchedAt = at.toISOString();
@@ -12,6 +18,7 @@ function addWatches(db: Db, eps: Pick<Ep, 'id' | 'titleId'>[], at: Date) {
 			.values({ titleId: e.titleId, episodeId: e.id, watchedAt, source: 'app', importKey: null })
 			.run();
 	}
+	leaveWatchlist(db, eps.map((e) => e.titleId));
 }
 
 function watchedIds(db: Db, ids: number[]): Set<number> {
@@ -27,7 +34,7 @@ export function isWatched(db: Db, episodeId: number): boolean {
 export function markEpisode(db: Db, episodeId: number, at: Date = new Date()): void {
 	const e = db.select().from(episode).where(eq(episode.id, episodeId)).get();
 	if (!e) return;
-	addWatches(db, [e], at);
+	db.transaction((tx) => addWatches(tx as unknown as Db, [e], at));
 }
 
 export function unmarkEpisode(db: Db, episodeId: number): void {
@@ -104,9 +111,12 @@ export function markUpTo(
 }
 
 export function markMovie(db: Db, titleId: number, at: Date = new Date()): void {
-	db.insert(watch)
-		.values({ titleId, episodeId: null, watchedAt: at.toISOString(), source: 'app', importKey: null })
-		.run();
+	db.transaction((tx) => {
+		tx.insert(watch)
+			.values({ titleId, episodeId: null, watchedAt: at.toISOString(), source: 'app', importKey: null })
+			.run();
+		leaveWatchlist(tx as unknown as Db, [titleId]);
+	});
 }
 
 export function unmarkMovieLatest(db: Db, titleId: number): void {

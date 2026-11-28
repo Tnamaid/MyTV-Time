@@ -1,5 +1,6 @@
 <script lang="ts">
-	let { src, name, width = 92 }: { src: string | null; name: string; width?: number } = $props();
+	/** width: px, or null to fill the parent's width. */
+	let { src, name, width = 92 }: { src: string | null; name: string; width?: number | null } = $props();
 
 	const initials = $derived(
 		name
@@ -11,7 +12,7 @@
 	);
 </script>
 
-<div class="poster" style:width="{width}px">
+<div class="poster" style:width={width === null ? '100%' : `${width}px`}>
 	{#if src}
 		<img {src} alt="" loading="lazy" />
 	{:else}
