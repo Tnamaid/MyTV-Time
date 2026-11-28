@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import PosterCard from '#lib/components/PosterCard.svelte';
+	import Poster from '#lib/components/Poster.svelte';
 	import { epCode } from '#lib/format.ts';
 	import type { PageProps } from './$types';
 
@@ -23,32 +23,30 @@
 		{#each data.items as item (item.titleId)}
 			{@const code = epCode(item.season, item.episode)}
 			<li>
-				<PosterCard href="/title/{item.titleId}" posterUrl={item.posterUrl} name={item.name}>
-					<p class="ep"><strong>{code}</strong>{#if item.episodeName}{` · ${item.episodeName}`}{/if}</p>
-					{#if item.remainingAired > 1}<p class="more">+{item.remainingAired - 1} more</p>{/if}
-					{#snippet action()}
-						<form
-							method="POST"
-							action="?/watch"
-							use:enhance={() => {
-								busy[item.titleId] = true;
-								return async ({ update }) => {
-									await update();
-									busy[item.titleId] = false;
-								};
-							}}
-						>
-							<input type="hidden" name="episodeId" value={item.episodeId} />
-							<button
-								class="tick"
-								aria-label="Mark {item.name} {code} watched"
-								disabled={busy[item.titleId]}
-							>
-								✓
-							</button>
-						</form>
-					{/snippet}
-				</PosterCard>
+				<!-- Tile: poster, name and episode only; the rest is on the title page. -->
+				<article>
+					<a href="/title/{item.titleId}">
+						<Poster src={item.posterUrl} name={item.name} width={null} />
+						<h2>{item.name}</h2>
+						<p class="ep">{code}</p>
+					</a>
+					<form
+						method="POST"
+						action="?/watch"
+						use:enhance={() => {
+							busy[item.titleId] = true;
+							return async ({ update }) => {
+								await update();
+								busy[item.titleId] = false;
+							};
+						}}
+					>
+						<input type="hidden" name="episodeId" value={item.episodeId} />
+						<button class="tick" aria-label="Mark {item.name} {code} watched" disabled={busy[item.titleId]}>
+							✓
+						</button>
+					</form>
+				</article>
 			</li>
 		{/each}
 	</ul>
@@ -60,18 +58,30 @@
 		margin: 0;
 		padding: 0;
 		display: grid;
-		gap: 0.75rem;
+		/* 3 tiles across on a phone, more on wider screens. */
+		grid-template-columns: repeat(auto-fill, minmax(min(30%, 150px), 1fr));
+		gap: 0.75rem 0.6rem;
 	}
 
-	@media (min-width: 1024px) {
+	@media (min-width: 600px) {
 		ul {
-			grid-template-columns: 1fr 1fr;
+			grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+			gap: 1rem 0.85rem;
 		}
 	}
 
-	.ep {
-		margin: 0;
-		color: var(--text);
+	article {
+		position: relative;
+	}
+
+	a {
+		display: block;
+		text-decoration: none;
+	}
+
+	h2 {
+		font-size: 0.9rem;
+		margin: 0.4rem 0 0.1rem;
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
 		line-clamp: 2;
@@ -79,28 +89,41 @@
 		overflow: hidden;
 	}
 
-	.ep strong {
+	.ep {
+		margin: 0;
+		font-size: 0.85rem;
+		color: var(--muted);
 		font-variant-numeric: tabular-nums;
 	}
 
-	.more {
-		margin: 0.15rem 0 0;
-		font-size: 0.85rem;
-		color: var(--muted);
+	/* ✓ sits on the poster's bottom-right corner. */
+	form {
+		position: absolute;
+		top: 0;
+		right: 0;
+		width: 100%;
+		aspect-ratio: 2 / 3;
+		pointer-events: none;
+		display: flex;
+		align-items: flex-end;
+		justify-content: flex-end;
+		padding: 0.35rem;
 	}
 
 	.tick {
-		width: 60px;
-		height: 60px;
+		pointer-events: auto;
+		width: 44px;
+		height: 44px;
 		border-radius: 50%;
-		border: 0;
+		border: 2px solid var(--bg);
 		background: var(--accent);
 		color: var(--accent-text);
-		font-size: 1.8rem;
+		font-size: 1.3rem;
 		font-weight: 800;
 		cursor: pointer;
 		display: grid;
 		place-items: center;
+		box-shadow: 0 2px 8px rgb(0 0 0 / 0.45);
 		transition: transform 0.1s;
 	}
 

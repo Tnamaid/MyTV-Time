@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { openDb } from '../../src/lib/server/db/client';
-import { episode, title, watch } from '../../src/lib/server/db/schema';
+import { episode, title, watch, watchlist } from '../../src/lib/server/db/schema';
 import {
 	importedOnlyLatest, isWatched, markEpisode, markMovie, markSeason, markUpTo, unmarkEpisode, unmarkMovieLatest
 } from '../../src/lib/server/watches/service';
@@ -123,4 +123,25 @@ test('importedOnlyLatest: latest watch of episodes whose watches are all importe
 	db.insert(watch).values({ titleId: other.id, episodeId: oe.id, watchedAt: '2020-01-01T00:00:00.000Z', source: 'tvtime1', importKey: 'o' }).run();
 
 	expect(importedOnlyLatest(db, t.id)).toEqual(new Map([[eps['1x1'].id, '2023-05-02T20:00:00.000Z']]));
+});
+
+test('watching anything of a title takes it off the watchlist; unwatched titles stay', () => {
+	const { db, t, eps } = seed();
+	const movie = db.insert(title).values({ kind: 'movie', tmdbId: 2, name: 'M', addedAt: '2026-01-01T00:00:00.000Z' }).returning().get();
+	const other = db.insert(title).values({ kind: 'movie', tmdbId: 3, name: 'O', addedAt: '2026-01-01T00:00:00.000Z' }).returning().get();
+	const listed = () => db.select().from(watchlist).all().map((w) => w.titleId).sort();
+	const add = (id: number) => db.insert(watchlist).values({ titleId: id, addedAt: '2026-01-01T00:00:00.000Z' }).run();
+	for (const id of [t.id, movie.id, other.id]) add(id);
+
+	markEpisode(db, eps['1x1'].id);
+	expect(listed()).toEqual([movie.id, other.id].sort());
+	markMovie(db, movie.id);
+	expect(listed()).toEqual([other.id]);
+
+	add(t.id);
+	markSeason(db, t.id, 2, new Date(), TODAY);
+	expect(listed()).toEqual([other.id]);
+	add(t.id);
+	markUpTo(db, eps['2x4'].id, new Date(), TODAY);
+	expect(listed()).toEqual([other.id]);
 });

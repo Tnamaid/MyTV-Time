@@ -30,6 +30,7 @@ type Row = {
 /**
  * Followed, non-archived series with an aired next episode: the first season>0 episode
  * strictly after the furthest watched (season, episode). Earlier gaps are ignored.
+ * Series on the watchlist ("to watch later") are left out until something of them is watched.
  */
 export function getUpNext(db: Db, todayStr: string): UpNextItem[] {
 	const rows = db.all<Row>(sql`
@@ -45,6 +46,7 @@ export function getUpNext(db: Db, todayStr: string): UpNextItem[] {
 				(SELECT MAX(w.watched_at) FROM watch w WHERE w.title_id = t.id) AS last_watched_at
 			FROM title t LEFT JOIN furthest f ON f.title_id = t.id
 			WHERE t.kind = 'series' AND t.followed = 1 AND t.archived = 0
+				AND NOT EXISTS (SELECT 1 FROM watchlist wl WHERE wl.title_id = t.id)
 		)
 		SELECT b.title_id AS titleId, b.name AS name, b.poster_path AS posterPath,
 			n.id AS episodeId, n.season_number AS season, n.episode_number AS episode,

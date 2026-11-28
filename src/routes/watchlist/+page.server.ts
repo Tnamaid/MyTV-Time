@@ -49,15 +49,12 @@ export const actions: Actions = {
 			removeFromWatchlist(locals.db, t.id);
 		}),
 
-	/** Movies only: log a watch and take it off the list (it has been watched). */
+	/** Movies only: log a watch; markMovie takes it off the list (it has been watched). */
 	watched: ({ request, locals }) =>
 		handleBadInput(async () => {
 			const t = listed(locals.db, await request.formData());
 			if (!t) return fail(404, { message: 'Not on the watchlist' });
 			if (t.kind !== 'movie') return fail(400, { message: 'Only movies can be marked watched here' });
-			locals.db.transaction(() => {
-				markMovie(locals.db, t.id);
-				removeFromWatchlist(locals.db, t.id);
-			});
+			markMovie(locals.db, t.id);
 		})
 };
